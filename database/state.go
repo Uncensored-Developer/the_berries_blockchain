@@ -104,3 +104,7 @@ func (s *State) Persist() error {
 
 	return nil
 }
+
+func (s *State) Close() {
+	s.dbFile.Close()
+}

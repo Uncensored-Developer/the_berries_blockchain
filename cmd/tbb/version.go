@@ -13,7 +13,7 @@ const (
 )
 
 var versionCmd = &cobra.Command{
-	Use:   "Version",
+	Use:   "version",
 	Short: "Describes version",
 	Run: func(cmd *cobra.Command, args []string) {
 		fmt.Printf("Version: %s.%s.%s %s\n", Major, Minor, Fix, Verbal)
