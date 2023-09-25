@@ -1,0 +1,7 @@
+{
+  "genesis_time": "2022-04-19T00:00:00.000000000Z",
+  "chain_id": "the-berries-ledger",
+  "balances": {
+    "gold_rodger": 1000000
+  }
+}
