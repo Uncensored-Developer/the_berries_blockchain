@@ -3,8 +3,9 @@
 {"from":"gold_rodger","to":"white_beard","value":2000,"data":""}
 {"from":"gold_rodger","to":"gold_rodger","value":100,"data":"reward"}
 {"from":"white_beard","to":"gold_rodger","value":1,"data":""}
-{"from":"gold_rodger","to":"gold_rodger","value":3,"data":""}
-{"from":"gold_rodger","to":"gold_rodger","value":700,"data":"reward"}
-{"from":"gold_rodger","to":"white_beard","value":2000,"data":""}
+{"from":"white_beard","to":"rocks","value":1000,"data":""}
+{"from":"white_beard","to":"gold_rodger","value":50,"data":""}
 {"from":"gold_rodger","to":"gold_rodger","value":100,"data":"reward"}
-{"from":"white_beard","to":"gold_rodger","value":1,"data":""}
+{"from":"gold_rodger","to":"gold_rodger","value":100,"data":"reward"}
+{"from":"gold_rodger","to":"gold_rodger","value":100,"data":"reward"}
+{"from":"gold_rodger","to":"gold_rodger","value":100,"data":"reward"}
