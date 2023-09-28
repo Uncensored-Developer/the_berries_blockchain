@@ -2,6 +2,7 @@ package main
 
 import (
 	"github.com/spf13/cobra"
+	"kryptcoin/fs"
 	"log"
 )
 
@@ -19,6 +20,7 @@ func main() {
 	tbbCmd.AddCommand(versionCmd)
 	tbbCmd.AddCommand(getBalancesCmd())
 	tbbCmd.AddCommand(getRunCmd())
+	tbbCmd.AddCommand(getMigrateCmd())
 
 	err := tbbCmd.Execute()
 	if err != nil {
@@ -29,4 +31,9 @@ func main() {
 func addDefaultRequiredFlags(cmd *cobra.Command) {
 	cmd.Flags().String(flagDataDir, "", "Absolute path to the node data dir where the DB is stored.")
 	cmd.MarkFlagRequired(flagDataDir)
+}
+
+func getDataDirFromCmd(cmd *cobra.Command) string {
+	dataDir, _ := cmd.Flags().GetString(flagDataDir)
+	return fs.ExpandPath(dataDir)
 }
