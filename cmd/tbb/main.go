@@ -18,7 +18,7 @@ func main() {
 
 	tbbCmd.AddCommand(versionCmd)
 	tbbCmd.AddCommand(getBalancesCmd())
-	tbbCmd.AddCommand(getTxnsCmd())
+	tbbCmd.AddCommand(getRunCmd())
 
 	err := tbbCmd.Execute()
 	if err != nil {
