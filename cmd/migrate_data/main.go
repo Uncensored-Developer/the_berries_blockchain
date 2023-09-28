@@ -3,11 +3,13 @@ package main
 import (
 	"kryptcoin/database"
 	"log"
+	"os"
 	"time"
 )
 
 func main() {
-	state, err := database.NewStateFromDisk()
+	cwd, _ := os.Getwd()
+	state, err := database.NewStateFromDisk(cwd)
 	if err != nil {
 		log.Fatalf("Error reading state: %v\n", err)
 	}
