@@ -5,6 +5,8 @@ import (
 	"log"
 )
 
+const flagDataDir = "data_dir"
+
 func main() {
 	tbbCmd := &cobra.Command{
 		Use:   "tbb",
@@ -16,10 +18,15 @@ func main() {
 
 	tbbCmd.AddCommand(versionCmd)
 	tbbCmd.AddCommand(getBalancesCmd())
-	tbbCmd.AddCommand(getTxnsCmd())
+	tbbCmd.AddCommand(getRunCmd())
 
 	err := tbbCmd.Execute()
 	if err != nil {
 		log.Fatalf("Could not execute command: %v\n", err)
 	}
+}
+
+func addDefaultRequiredFlags(cmd *cobra.Command) {
+	cmd.Flags().String(flagDataDir, "", "Absolute path to the node data dir where the DB is stored.")
+	cmd.MarkFlagRequired(flagDataDir)
 }
