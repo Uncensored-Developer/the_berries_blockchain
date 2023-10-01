@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"reflect"
-	"time"
 )
 
 type State struct {
@@ -117,15 +116,6 @@ func (s *State) copy() State {
 	return c
 }
 
-//func (s *State) applyBlock(b Block) error {
-//	for _, txn := range b.Txns {
-//		if err := s.apply(txn); err != nil {
-//			return err
-//		}
-//	}
-//	return nil
-//}
-
 func (s *State) AddTxn(txn Txn) error {
 	if err := s.apply(txn); err != nil {
 		return err
@@ -180,42 +170,6 @@ func (s *State) AddBlocks(blocks []Block) error {
 	return nil
 }
 
-func (s *State) Persist() (Hash, error) {
-	//Create new Block with only the new transactions
-	block := NewBlock(
-		s.latestBlock.Header.Height+1,
-		s.latestBlockHash,
-		uint64(time.Now().Unix()),
-		s.txnMempool,
-	)
-	blockHash, err := block.Hash()
-	if err != nil {
-		return Hash{}, err
-	}
-
-	blockFs := BlockFS{blockHash, block}
-
-	//encode into JSON string
-	blockFsJson, err := json.Marshal(blockFs)
-	if err != nil {
-		return Hash{}, err
-	}
-
-	fmt.Println("Saving new Block to disk:")
-	fmt.Printf("\t%s\n", blockFsJson)
-
-	_, err = s.dbFile.Write(append(blockFsJson, '\n'))
-	if err != nil {
-		return Hash{}, err
-	}
-
-	s.latestBlockHash = blockHash
-
-	//reset the mempool
-	s.txnMempool = []Txn{}
-	return s.latestBlockHash, nil
-}
-
 func (s *State) Close() {
 	s.dbFile.Close()
 }
@@ -225,10 +179,12 @@ func (s *State) Close() {
 func applyBlock(b Block, s State) error {
 	nextExpectedBlockHeight := s.latestBlock.Header.Height + 1
 
+	// validate that the next block number increases by 1
 	if s.hasGenesisBlock && b.Header.Height != nextExpectedBlockHeight {
 		return fmt.Errorf("next expected block height must be '%d' not '%d'", nextExpectedBlockHeight, b.Header.Height)
 	}
 
+	// validate that the incoming block parent hash equals the current block hash
 	if s.hasGenesisBlock && s.latestBlock.Header.Height > 0 && !reflect.DeepEqual(b.Header.Parent, s.latestBlockHash) {
 		return fmt.Errorf("next block parent hash must be %x not %x", s.latestBlockHash, b.Header.Parent)
 	}
