@@ -1,42 +1,93 @@
 package node
 
 import (
-	"encoding/json"
+	"context"
 	"fmt"
-	"io"
 	"kryptcoin/database"
-	"log"
 	"net/http"
 )
 
-type ErrorResponse struct {
-	Error string `json:"error"`
+const (
+	DefaultHTTPPort = 8081
+	DefaultIP       = "127.0.0.1"
+
+	pathNodeStatus = "/node/status"
+	pathNodeSync   = "/node/sync"
+
+	pathSyncQueryKeyFromBlock = "fromBlock"
+
+	pathAddPeer             = "/node/peer"
+	pathAddPeerQueryKeyIP   = "ip"
+	pathAddPeerQueryKeyPort = "port"
+)
+
+type PeerNode struct {
+	IP          string `json:"ip"`
+	Port        uint64 `json:"port"`
+	IsBootstrap bool   `json:"is_bootstrap"`
+	connected   bool   // when node already established connection
 }
 
-type BalancesResponse struct {
-	Hash     database.Hash             `json:"block_hash"`
-	Balances map[database.Account]uint `json:"balances"`
+type Node struct {
+	dataDir string
+	ip      string
+	port    uint64
+
+	state      *database.State // To inject the State into the HTTP handlers
+	knownPeers map[string]PeerNode
 }
 
-type TxnAddReq struct {
-	From  string `json:"from"`
-	To    string `json:"to"`
-	Value uint   `json:"value"`
-	Data  string `json:"data"`
+func (pn PeerNode) TcpAddress() string {
+	return fmt.Sprintf("%s:%d", pn.IP, pn.Port)
 }
 
-type TxnAddRes struct {
-	Hash database.Hash `json:"block_hash"`
+func (n *Node) AddPeer(peer PeerNode) {
+	n.knownPeers[peer.TcpAddress()] = peer
 }
 
-const httpPort = 8081
+func (n *Node) RemovePeer(peer PeerNode) {
+	delete(n.knownPeers, peer.TcpAddress())
+}
 
-func Run(dataDir string) error {
-	state, err := database.NewStateFromDisk(dataDir)
+func (n *Node) IsKnownPeer(peer PeerNode) bool {
+	if peer.IP == n.ip && peer.Port == n.port {
+		return true
+	}
+	_, present := n.knownPeers[peer.TcpAddress()]
+	return present
+}
+
+func NewNode(dataDir string, ip string, port uint64, bootstrap PeerNode) *Node {
+	// Initialize a new map with only one known peer,
+	// the bootstrap node
+	knownPeers := make(map[string]PeerNode)
+	knownPeers[bootstrap.TcpAddress()] = bootstrap
+
+	return &Node{
+		dataDir:    dataDir,
+		ip:         ip,
+		port:       port,
+		knownPeers: knownPeers,
+	}
+}
+
+func NewPeerNode(ip string, port uint64, isBootstrap bool, connected bool) PeerNode {
+	return PeerNode{ip, port, isBootstrap, connected}
+}
+
+func (n *Node) Run() error {
+	ctx := context.Background()
+	fmt.Printf("Listening on: %s:%d", n.ip, n.port)
+
+	state, err := database.NewStateFromDisk(n.dataDir)
 	if err != nil {
 		return err
 	}
 	defer state.Close()
+
+	n.state = state
+
+	go n.sync(ctx)
 
 	http.HandleFunc("/balances/list", func(w http.ResponseWriter, req *http.Request) {
 		listBalancesHandler(w, req, state)
@@ -46,80 +97,21 @@ func Run(dataDir string) error {
 		txnAddHandler(w, req, state)
 	})
 
-	err = http.ListenAndServe(fmt.Sprintf(":%d", httpPort), nil)
+	http.HandleFunc(pathNodeStatus, func(w http.ResponseWriter, req *http.Request) {
+		statusHandler(w, req, n)
+	})
+
+	http.HandleFunc(pathAddPeer, func(w http.ResponseWriter, req *http.Request) {
+		addPeerHandler(w, req, n)
+	})
+
+	http.HandleFunc(pathNodeSync, func(w http.ResponseWriter, req *http.Request) {
+		syncHandler(w, req, n)
+	})
+
+	err = http.ListenAndServe(fmt.Sprintf(":%d", n.port), nil)
 	if err != nil {
 		return err
 	}
 	return nil
-}
-
-func writeErrorRes(w http.ResponseWriter, err error) {
-	jsonErrRes, _ := json.Marshal(ErrorResponse{err.Error()})
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusInternalServerError)
-	_, err = w.Write(jsonErrRes)
-	if err != nil {
-		log.Fatalf("Error writing response: %v\n", err)
-	}
-}
-
-func writeRes(w http.ResponseWriter, content any) {
-	contentJson, err := json.Marshal(content)
-	if err != nil {
-		writeErrorRes(w, err)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_, err = w.Write(contentJson)
-	if err != nil {
-		log.Fatalf("Error writing response: %v\n", err)
-	}
-}
-
-func readReq(r *http.Request, reqBody any) error {
-	reqBodyJson, err := io.ReadAll(r.Body)
-	if err != nil {
-		return fmt.Errorf("unable to read request body. %s", err.Error())
-	}
-	defer r.Body.Close()
-
-	err = json.Unmarshal(reqBodyJson, reqBody)
-	if err != nil {
-		return fmt.Errorf("unable to unmarshal request body. %s", err.Error())
-	}
-	return nil
-}
-
-func listBalancesHandler(w http.ResponseWriter, r *http.Request, state *database.State) {
-	writeRes(w, BalancesResponse{state.LatestBlockHash(), state.Balances})
-}
-
-func txnAddHandler(w http.ResponseWriter, r *http.Request, state *database.State) {
-	req := TxnAddReq{}
-	err := readReq(r, &req)
-	if err != nil {
-		writeErrorRes(w, err)
-		return
-	}
-
-	txn := database.NewTxn(
-		database.NewAccount(req.From),
-		database.NewAccount(req.To),
-		req.Value,
-		req.Data,
-	)
-	err = state.AddTxn(txn)
-	if err != nil {
-		writeErrorRes(w, err)
-		return
-	}
-
-	hash, err := state.Persist()
-	if err != nil {
-		writeErrorRes(w, err)
-		return
-	}
-	writeRes(w, TxnAddRes{hash})
 }

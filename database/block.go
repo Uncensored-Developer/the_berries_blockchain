@@ -1,6 +1,7 @@
 package database
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -17,7 +18,17 @@ func (h *Hash) UnmarshalText(data []byte) error {
 	return err
 }
 
+func (h Hash) Hex() string {
+	return hex.EncodeToString(h[:])
+}
+
+func (h Hash) IsEmpty() bool {
+	emptyHash := Hash{}
+	return bytes.Equal(emptyHash[:], h[:])
+}
+
 type BlockHeader struct {
+	Height uint64 `json:"height"`
 	Parent Hash   `json:"parent"`
 	Time   uint64 `json:"time"`
 }
@@ -31,8 +42,8 @@ type BlockFS struct {
 	Value Block `json:"block"`
 }
 
-func NewBlock(parent Hash, time uint64, txns []Txn) Block {
-	return Block{BlockHeader{parent, time}, txns}
+func NewBlock(height uint64, parent Hash, time uint64, txns []Txn) Block {
+	return Block{BlockHeader{height, parent, time}, txns}
 }
 
 func (b Block) Hash() (Hash, error) {
