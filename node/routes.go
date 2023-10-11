@@ -5,7 +5,6 @@ import (
 	"kryptcoin/database"
 	"net/http"
 	"strconv"
-	"time"
 )
 
 type ErrorResponse struct {
@@ -25,13 +24,20 @@ type TxnAddReq struct {
 }
 
 type TxnAddRes struct {
-	Hash database.Hash `json:"block_hash"`
+	// Return confirmation not block hash because
+	// the mining takes sometimes several minutes
+	// and the TXNs should be distributed to all nodes
+	// so everyone has equal chance of mining the block
+	Success bool `json:"success"`
 }
 
 type StatusRes struct {
 	Hash       database.Hash       `json:"block_hash"`
 	Height     uint64              `json:"block_height"`
 	KnownPeers map[string]PeerNode `json:"known_peers"`
+
+	// Exchange pending TXNs as part of the periodic Sync() interval
+	PendingTxns []database.Txn `json:"pending_txns"`
 }
 
 type SyncRes struct {
@@ -47,7 +53,7 @@ func listBalancesHandler(w http.ResponseWriter, r *http.Request, state *database
 	writeRes(w, BalancesResponse{state.LatestBlockHash(), state.Balances})
 }
 
-func txnAddHandler(w http.ResponseWriter, r *http.Request, state *database.State) {
+func txnAddHandler(w http.ResponseWriter, r *http.Request, node *Node) {
 	req := TxnAddReq{}
 	err := readReq(r, &req)
 	if err != nil {
@@ -62,18 +68,12 @@ func txnAddHandler(w http.ResponseWriter, r *http.Request, state *database.State
 		req.Data,
 	)
 
-	block := database.NewBlock(
-		state.NextBlockHeight(),
-		state.LatestBlockHash(),
-		uint64(time.Now().Unix()),
-		[]database.Txn{txn},
-	)
-	hash, err := state.AddBlock(block)
+	err = node.AddPendingTxn(txn, node.info)
 	if err != nil {
 		writeErrorRes(w, err)
 		return
 	}
-	writeRes(w, TxnAddRes{hash})
+	writeRes(w, TxnAddRes{true})
 }
 
 func statusHandler(w http.ResponseWriter, r *http.Request, node *Node) {
@@ -88,6 +88,7 @@ func statusHandler(w http.ResponseWriter, r *http.Request, node *Node) {
 func addPeerHandler(w http.ResponseWriter, r *http.Request, node *Node) {
 	peerIP := r.URL.Query().Get(pathAddPeerQueryKeyIP)
 	peerPortRaw := r.URL.Query().Get(pathAddPeerQueryKeyPort)
+	minerRaw := r.URL.Query().Get(pathAddPeerQueryKeyMiner)
 
 	peerPort, err := strconv.ParseUint(peerPortRaw, 10, 32)
 	if err != nil {
@@ -95,7 +96,7 @@ func addPeerHandler(w http.ResponseWriter, r *http.Request, node *Node) {
 		return
 	}
 
-	peer := NewPeerNode(peerIP, peerPort, false, true)
+	peer := NewPeerNode(peerIP, peerPort, false, database.Account(minerRaw), true)
 	node.AddPeer(peer)
 
 	fmt.Printf("Peer %s was added into KnownPeers\n", peer.TcpAddress())

@@ -9,6 +9,7 @@ import (
 const flagDataDir = "data_dir"
 const flagIP = "ip"
 const flagPort = "port"
+const flagMiner = "miner"
 
 func main() {
 	tbbCmd := &cobra.Command{

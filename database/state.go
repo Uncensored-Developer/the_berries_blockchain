@@ -6,11 +6,11 @@ import (
 	"fmt"
 	"os"
 	"reflect"
+	"sort"
 )
 
 type State struct {
 	Balances        map[Account]uint
-	txnMempool      []Txn
 	dbFile          *os.File
 	latestBlock     Block
 	latestBlockHash Hash
@@ -54,7 +54,7 @@ func NewStateFromDisk(dataDir string) (*State, error) {
 	}
 
 	scanner := bufio.NewScanner(f)
-	state := &State{balances, make([]Txn, 0), f, Block{}, Hash{}, false}
+	state := &State{balances, f, Block{}, Hash{}, false}
 
 	//loop over each of the txn line in the txn.db file
 	for scanner.Scan() {
@@ -102,33 +102,19 @@ func (s *State) copy() State {
 	c.hasGenesisBlock = s.hasGenesisBlock
 	c.latestBlock = s.latestBlock
 	c.latestBlockHash = s.latestBlockHash
-	c.txnMempool = make([]Txn, len(s.txnMempool))
 	c.Balances = make(map[Account]uint)
 
 	for acct, balance := range s.Balances {
 		c.Balances[acct] = balance
 	}
 
-	for _, txn := range s.txnMempool {
-		c.txnMempool = append(c.txnMempool, txn)
-	}
-
 	return c
-}
-
-func (s *State) AddTxn(txn Txn) error {
-	if err := s.apply(txn); err != nil {
-		return err
-	}
-
-	s.txnMempool = append(s.txnMempool, txn)
-	return nil
 }
 
 func (s *State) AddBlock(b Block) (Hash, error) {
 	pendingState := s.copy()
 
-	err := applyBlock(b, pendingState)
+	err := applyBlock(b, &pendingState)
 	if err != nil {
 		return Hash{}, err
 	}
@@ -176,7 +162,7 @@ func (s *State) Close() {
 
 // applyBlock verifies if block can be added to the blockchain.
 // Block metadata are verified as well as transactions within (sufficient balances, etc).
-func applyBlock(b Block, s State) error {
+func applyBlock(b Block, s *State) error {
 	nextExpectedBlockHeight := s.latestBlock.Header.Height + 1
 
 	// validate that the next block number increases by 1
@@ -189,15 +175,25 @@ func applyBlock(b Block, s State) error {
 		return fmt.Errorf("next block parent hash must be %x not %x", s.latestBlockHash, b.Header.Parent)
 	}
 
-	return applyTxns(b.Txns, &s)
+	hash, err := b.Hash()
+	if err != nil {
+		return err
+	}
+
+	if !IsBlockHashValid(hash) {
+		return fmt.Errorf("invalid block hash %x", hash)
+	}
+
+	err = applyTxns(b.Txns, s)
+	if err != nil {
+		return err
+	}
+
+	s.Balances[b.Header.Miner] += Reward
+	return nil
 }
 
 func applyTxn(txn Txn, s *State) error {
-	if txn.IsReward() {
-		s.Balances[txn.To] += txn.Value
-		return nil
-	}
-
 	if txn.Value > s.Balances[txn.From] {
 		return fmt.Errorf(
 			"insufficient funds; Sender (%s) balance is %d BRS, Txn cost %d BRS",
@@ -212,6 +208,9 @@ func applyTxn(txn Txn, s *State) error {
 }
 
 func applyTxns(txns []Txn, s *State) error {
+	sort.Slice(txns, func(i, j int) bool {
+		return txns[i].Time < txns[j].Time
+	})
 	for _, txn := range txns {
 		err := applyTxn(txn, s)
 		if err != nil {
