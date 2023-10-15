@@ -3,21 +3,22 @@ package database
 import (
 	"crypto/sha256"
 	"encoding/json"
+	"github.com/ethereum/go-ethereum/common"
 	"time"
 )
 
 type Account string
 
-func NewAccount(value string) Account {
-	return Account(value)
+func NewAccount(value string) common.Address {
+	return common.HexToAddress(value)
 }
 
 type Txn struct {
-	From  Account `json:"from"`
-	To    Account `json:"to"`
-	Value uint    `json:"value"`
-	Data  string  `json:"data"`
-	Time  uint64  `json:"time"`
+	From  common.Address `json:"from"`
+	To    common.Address `json:"to"`
+	Value uint           `json:"value"`
+	Data  string         `json:"data"`
+	Time  uint64         `json:"time"`
 }
 
 func (t Txn) IsReward() bool {
@@ -32,6 +33,6 @@ func (t Txn) Hash() (Hash, error) {
 	return sha256.Sum256(txnJson), nil
 }
 
-func NewTxn(from Account, to Account, value uint, data string) Txn {
+func NewTxn(from, to common.Address, value uint, data string) Txn {
 	return Txn{from, to, value, data, uint64(time.Now().Unix())}
 }
