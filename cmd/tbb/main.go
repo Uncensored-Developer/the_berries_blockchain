@@ -10,6 +10,7 @@ const flagDataDir = "data_dir"
 const flagIP = "ip"
 const flagPort = "port"
 const flagMiner = "miner"
+const flagKeystoreFile = "keystore"
 
 func main() {
 	tbbCmd := &cobra.Command{
@@ -39,4 +40,9 @@ func addDefaultRequiredFlags(cmd *cobra.Command) {
 func getDataDirFromCmd(cmd *cobra.Command) string {
 	dataDir, _ := cmd.Flags().GetString(flagDataDir)
 	return fs.ExpandPath(dataDir)
+}
+
+func addKeystoreFlag(cmd *cobra.Command) {
+	cmd.Flags().String(flagKeystoreFile, "", "Absolute path to the encrypted keystore file.")
+	cmd.MarkFlagRequired(flagKeystoreFile)
 }
