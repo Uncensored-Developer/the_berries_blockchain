@@ -2,37 +2,38 @@ package database
 
 import (
 	"encoding/json"
+	"github.com/ethereum/go-ethereum/common"
 	"os"
 )
 
-type genesis struct {
-	Balances map[Account]uint `json:"balances"`
+type Genesis struct {
+	Balances map[common.Address]uint `json:"balances"`
 }
 
 var genesisJson = `
 {
   "genesis_time": "2022-04-19T00:00:00.000000000Z",
-  "chain_id": "the-berries-ledger",
+  "chain_id": "the-one-piece-berries-ledger",
   "balances": {
-    "gold_rodger": 1000000
+    "0x0418A658C5874D2Fe181145B685d2e73D761865D": 1000000
   }
 }
 `
 
-func loadGenesis(path string) (genesis, error) {
+func loadGenesis(path string) (Genesis, error) {
 	content, err := os.ReadFile(path)
 	if err != nil {
-		return genesis{}, err
+		return Genesis{}, err
 	}
 
-	var loadedGenesis genesis
+	var loadedGenesis Genesis
 	err = json.Unmarshal(content, &loadedGenesis)
 	if err != nil {
-		return genesis{}, err
+		return Genesis{}, err
 	}
 	return loadedGenesis, nil
 }
 
-func writeGenesisToDisk(path string) error {
-	return os.WriteFile(path, []byte(genesisJson), 0644)
+func writeGenesisToDisk(path string, genesis []byte) error {
+	return os.WriteFile(path, genesis, 0644)
 }

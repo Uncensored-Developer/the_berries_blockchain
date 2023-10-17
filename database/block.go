@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"github.com/ethereum/go-ethereum/common"
 	"regexp"
 )
 
@@ -31,15 +32,15 @@ func (h Hash) IsEmpty() bool {
 }
 
 type BlockHeader struct {
-	Height uint64  `json:"height"`
-	Parent Hash    `json:"parent"`
-	Time   uint64  `json:"time"`
-	Nonce  uint32  `json:"nonce"`
-	Miner  Account `json:"miner"`
+	Height uint64         `json:"height"`
+	Parent Hash           `json:"parent"`
+	Time   uint64         `json:"time"`
+	Nonce  uint32         `json:"nonce"`
+	Miner  common.Address `json:"miner"`
 }
 type Block struct {
 	Header BlockHeader `json:"header"`
-	Txns   []Txn       `json:"txns"`
+	Txns   []SignedTxn `json:"txns"`
 }
 
 type BlockFS struct {
@@ -47,7 +48,7 @@ type BlockFS struct {
 	Value Block `json:"block"`
 }
 
-func NewBlock(height uint64, parent Hash, time uint64, nonce uint32, miner Account, txns []Txn) Block {
+func NewBlock(height uint64, parent Hash, time uint64, nonce uint32, miner common.Address, txns []SignedTxn) Block {
 	return Block{BlockHeader{height, parent, time, nonce, miner}, txns}
 }
 

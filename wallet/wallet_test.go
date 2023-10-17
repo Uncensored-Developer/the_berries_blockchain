@@ -26,7 +26,6 @@ func TestSignCryptoParams(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Verify that the length is 65 bytes
 	if len(sig) != crypto.SignatureLength {
 		t.Fatalf(
 			"wrong size for signatureL got %d, expects %d",

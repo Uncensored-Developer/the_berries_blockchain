@@ -4,13 +4,15 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"github.com/ethereum/go-ethereum/common"
+	"log"
 	"os"
 	"reflect"
 	"sort"
 )
 
 type State struct {
-	Balances        map[Account]uint
+	Balances        map[common.Address]uint
 	dbFile          *os.File
 	latestBlock     Block
 	latestBlockHash Hash
@@ -33,7 +35,7 @@ func (s *State) NextBlockHeight() uint64 {
 }
 
 func NewStateFromDisk(dataDir string) (*State, error) {
-	err := initDataDirIfNotExists(dataDir)
+	err := InitDataDirIfNotExists(dataDir, []byte(genesisJson))
 	if err != nil {
 		return nil, err
 	}
@@ -43,7 +45,7 @@ func NewStateFromDisk(dataDir string) (*State, error) {
 		return nil, err
 	}
 
-	balances := make(map[Account]uint)
+	balances := make(map[common.Address]uint)
 	for account, balance := range genesis.Balances {
 		balances[account] = balance
 	}
@@ -69,7 +71,7 @@ func NewStateFromDisk(dataDir string) (*State, error) {
 			return nil, err
 		}
 
-		err = applyTxns(blockFs.Value.Txns, state)
+		err = applyBlock(blockFs.Value, state)
 		if err != nil {
 			return nil, err
 		}
@@ -102,7 +104,7 @@ func (s *State) copy() State {
 	c.hasGenesisBlock = s.hasGenesisBlock
 	c.latestBlock = s.latestBlock
 	c.latestBlockHash = s.latestBlockHash
-	c.Balances = make(map[Account]uint)
+	c.Balances = make(map[common.Address]uint)
 
 	for acct, balance := range s.Balances {
 		c.Balances[acct] = balance
@@ -130,8 +132,8 @@ func (s *State) AddBlock(b Block) (Hash, error) {
 		return Hash{}, err
 	}
 
-	fmt.Println("Saving new Block to disk:")
-	fmt.Printf("\t%s\n", blockFsJson)
+	log.Println("Saving new Block to disk:")
+	log.Printf("\t%s\n", blockFsJson)
 
 	_, err = s.dbFile.Write(append(blockFsJson, '\n'))
 	if err != nil {
@@ -193,7 +195,16 @@ func applyBlock(b Block, s *State) error {
 	return nil
 }
 
-func applyTxn(txn Txn, s *State) error {
+func applyTxn(txn SignedTxn, s *State) error {
+	// Verify the TXN was not forged
+	ok, err := txn.IsAuthentic()
+	if err != nil {
+		return err
+	}
+
+	if !ok {
+		return fmt.Errorf("forged TXN, Sender %s was forged", txn.From.String())
+	}
 	if txn.Value > s.Balances[txn.From] {
 		return fmt.Errorf(
 			"insufficient funds; Sender (%s) balance is %d BRS, Txn cost %d BRS",
@@ -207,7 +218,7 @@ func applyTxn(txn Txn, s *State) error {
 	return nil
 }
 
-func applyTxns(txns []Txn, s *State) error {
+func applyTxns(txns []SignedTxn, s *State) error {
 	sort.Slice(txns, func(i, j int) bool {
 		return txns[i].Time < txns[j].Time
 	})

@@ -2,21 +2,41 @@ package node
 
 import (
 	"context"
+	"encoding/json"
+	"github.com/ethereum/go-ethereum/common"
+	"io"
 	"kryptcoin/database"
+	"kryptcoin/wallet"
+	"log"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 )
 
-func getTestDataDirPath() string {
-	return filepath.Join(os.TempDir(), ".test_db")
+// Pre-generated for testing purposes using wallet_test.go.
+// It's necessary to have pre-existing accounts before a new node
+// with fresh new, empty keystore is initialized and booted in order
+// to configure the accounts balances in genesis.json
+const (
+	testKeystoreGoldRodgerAccount = "0x0418A658C5874D2Fe181145B685d2e73D761865D"
+	testKeystoreWhiteBeardAccount = "0x486512fA9fbaF06568D13826afe7822842b9E685"
+	testKeystoreGoldRodgerFile    = "test_goldRodger--0418A658C5874D2Fe181145B685d2e73D761865D"
+	testKeystoreWhiteBeardFile    = "test_whiteBeard--486512fA9fbaF06568D13826afe7822842b9E685"
+	testKeystorePassword          = "goodbrain"
+)
+
+func getTestDataDirPath() (string, error) {
+	return os.MkdirTemp(os.TempDir(), "opbb_test")
 }
 
 func TestNode_Run(t *testing.T) {
 	// Remove the test directory if it already exists
-	dataDir := getTestDataDirPath()
-	err := os.RemoveAll(dataDir)
+	dataDir, err := getTestDataDirPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = os.RemoveAll(dataDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -26,7 +46,7 @@ func TestNode_Run(t *testing.T) {
 		"127.0.0.1",
 		8089,
 		PeerNode{},
-		database.NewAccount("gold_rodger"),
+		database.NewAccount(DefaultMiner),
 	)
 
 	// Define a context with timeout so the Node.Run() will
@@ -39,12 +59,11 @@ func TestNode_Run(t *testing.T) {
 }
 
 func TestNode_Mining(t *testing.T) {
-	// Remove the test directory if it already exists
-	dataDir := getTestDataDirPath()
-	err := os.RemoveAll(dataDir)
+	dataDir, goldRodger, whiteBeard, err := setupTestDir()
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer os.RemoveAll(dataDir)
 
 	// Would be used to describe the node(local) the TXN came from
 	pN := NewPeerNode(
@@ -61,7 +80,7 @@ func TestNode_Mining(t *testing.T) {
 		pN.IP,
 		pN.Port,
 		pN,
-		database.NewAccount("gold_rodger"),
+		goldRodger,
 	)
 
 	// Allow the mining to run for 10 minutes, worst case
@@ -71,18 +90,42 @@ func TestNode_Mining(t *testing.T) {
 	// is a blocking call
 	go func() {
 		time.Sleep(time.Second * 3)
-		txn := database.NewTxn("gold_rodger", "white_beard", 1, "")
+		txn := database.NewTxn(goldRodger, whiteBeard, 1, "")
+		signedTxn, err := wallet.SignWithKeystoreAccount(
+			txn,
+			goldRodger,
+			testKeystorePassword,
+			wallet.GetKeystoreDirPath(dataDir),
+		)
+		if err != nil {
+			t.Error(err)
+			return
+		}
 
-		_ = n.AddPendingTxn(txn, pN) // Add txn to Mempool
+		_ = n.AddPendingTxn(signedTxn, pN) // Add txn to Mempool
 	}()
 
 	// Send a new TXN 12 seconds from now, in a separate goroutine
 	// simulating that it came in while the first TXN is being mined
 	go func() {
 		time.Sleep(time.Second * 12)
-		txn := database.NewTxn("gold_rodger", "white_beard", 2, "")
+		txn := database.NewTxn(goldRodger, whiteBeard, 2, "")
+		signedTxn, err := wallet.SignWithKeystoreAccount(
+			txn,
+			goldRodger,
+			testKeystorePassword,
+			wallet.GetKeystoreDirPath(dataDir),
+		)
+		if err != nil {
+			t.Error(err)
+			return
+		}
 
-		_ = n.AddPendingTxn(txn, pN) // Add txn to Mempool
+		err = n.AddPendingTxn(signedTxn, pN) // Add txn to Mempool
+		if err != nil {
+			t.Error(err)
+			return
+		}
 	}()
 
 	go func() {
@@ -107,13 +150,21 @@ func TestNode_Mining(t *testing.T) {
 	}
 }
 
+// The test logic summary:
+//
+//	WhiteBeard runs the node
+//	WhiteBeard tries to mine 2 Txns
+//	The mining gets interrupted because a new block from GoldRodger gets synced
+//	GoldRodger will get the block reward for this synced block
+//	The synced block contains 1 of the Txns WhiteBeard tried to mine
+//	WhiteBeard tries to mine 1 Txn left
+//	WhiteBeard succeeds and gets her block reward
 func TestNode_MiningStopsOnNewSyncedBlock(t *testing.T) {
-	// Remove the test directory if it already exists
-	dataDir := getTestDataDirPath()
-	err := os.RemoveAll(dataDir)
-	if err != nil {
-		t.Fatal(err)
-	}
+	dataDir, goldRodger, whiteBeard, err := setupTestDir()
+
+	log.Printf("^^^^ %s", goldRodger)
+	log.Printf("^^^^ %s", whiteBeard)
+	defer os.RemoveAll(dataDir)
 
 	// Would be used to describe the node(local) the TXN came from
 	pN := NewPeerNode(
@@ -124,17 +175,35 @@ func TestNode_MiningStopsOnNewSyncedBlock(t *testing.T) {
 		true,
 	)
 
-	goldRodgerAcct := database.NewAccount("gold_rodger")
-	whiteBeardAcct := database.NewAccount("white_beard")
-
-	n := NewNode(dataDir, pN.IP, pN.Port, pN, whiteBeardAcct)
+	n := NewNode(dataDir, pN.IP, pN.Port, pN, whiteBeard)
 
 	// Allow the mining to run for 10 minutes, worst case
 	ctx, shutDownNode := context.WithTimeout(context.Background(), time.Minute*10)
 
-	txn1 := database.NewTxn("gold_rodger", "white_beard", 1, "")
-	txn2 := database.NewTxn("gold_rodger", "white_beard", 2, "")
-	txn2Hash, _ := txn2.Hash()
+	txn1 := database.NewTxn(goldRodger, whiteBeard, 1, "")
+	signedTxn1, err := wallet.SignWithKeystoreAccount(
+		txn1,
+		goldRodger,
+		testKeystorePassword,
+		wallet.GetKeystoreDirPath(dataDir),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	txn2 := database.NewTxn(goldRodger, whiteBeard, 2, "")
+	signedTxn2, err := wallet.SignWithKeystoreAccount(
+		txn2,
+		goldRodger,
+		testKeystorePassword,
+		wallet.GetKeystoreDirPath(dataDir),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	txn2Hash, err := txn2.Hash()
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	// Pre-mine a valid block without running the `n.Run()`
 	// with gold_rodger as a miner who will receive the block reward,
@@ -142,8 +211,8 @@ func TestNode_MiningStopsOnNewSyncedBlock(t *testing.T) {
 	validPreMinedPendingBlock := NewPendingBlock(
 		database.Hash{},
 		0,
-		goldRodgerAcct,
-		[]database.Txn{txn1},
+		goldRodger,
+		[]database.SignedTxn{signedTxn1},
 	)
 
 	validSyncedBlock, err := Mine(ctx, validPreMinedPendingBlock)
@@ -155,13 +224,13 @@ func TestNode_MiningStopsOnNewSyncedBlock(t *testing.T) {
 	go func() {
 		time.Sleep(time.Second * (miningIntervalSeconds - 2))
 
-		err := n.AddPendingTxn(txn1, pN)
+		err := n.AddPendingTxn(signedTxn1, pN)
 		if err != nil {
 			t.Error(err)
 			return
 		}
 
-		err = n.AddPendingTxn(txn2, pN)
+		err = n.AddPendingTxn(signedTxn2, pN)
 		if err != nil {
 			t.Error(err)
 			return
@@ -227,16 +296,16 @@ func TestNode_MiningStopsOnNewSyncedBlock(t *testing.T) {
 		// Take a snapshot of the DB balances
 		// before the mining is finished and the 2 blocks
 		// are created.
-		startingGoldRodgerBalance := n.state.Balances[goldRodgerAcct]
-		startingWhiteBeardBalance := n.state.Balances[whiteBeardAcct]
+		startingGoldRodgerBalance := n.state.Balances[goldRodger]
+		startingWhiteBeardBalance := n.state.Balances[whiteBeard]
 
 		// Wait until the 10min timeout is reached or
 		// the 2 blocks got already mined and the closeNode() was triggered
 		<-ctx.Done()
 
 		// Check balances again
-		endGoldRodgerBalance := n.state.Balances[goldRodgerAcct]
-		endWhiteBeardBalance := n.state.Balances[whiteBeardAcct]
+		endGoldRodgerBalance := n.state.Balances[goldRodger]
+		endWhiteBeardBalance := n.state.Balances[whiteBeard]
 
 		// In TXN1 gold_rodger transferred 1 OPB token to white_beard
 		// In TXN2 gold_rodger transferred 2 OPB token to white_beard
@@ -244,17 +313,19 @@ func TestNode_MiningStopsOnNewSyncedBlock(t *testing.T) {
 		expectedEndWhiteBeardBalance := startingWhiteBeardBalance + txn1.Value + txn2.Value + database.Reward
 
 		if endGoldRodgerBalance != expectedEndGoldRodgerBalance {
-			t.Fatalf(
+			t.Errorf(
 				"gold_rodger's expected end balance is %d not %d",
 				expectedEndGoldRodgerBalance, endGoldRodgerBalance,
 			)
+			return
 		}
 
 		if endWhiteBeardBalance != expectedEndWhiteBeardBalance {
-			t.Fatalf(
+			t.Errorf(
 				"white_beard's expected end balance is %d not %d",
 				expectedEndWhiteBeardBalance, endWhiteBeardBalance,
 			)
+			return
 		}
 
 		t.Logf("Starting gold_rodger balance: %d", startingGoldRodgerBalance)
@@ -272,4 +343,81 @@ func TestNode_MiningStopsOnNewSyncedBlock(t *testing.T) {
 	if len(n.pendingTxns) != 0 {
 		t.Fatal("no pending TXNs should be left to mine")
 	}
+}
+
+// Copy the pre-generated keystore files from this folder into the new testDataDirPath()
+// Afterwards the test data_dir path will look like:
+// "/tmp/opbb_test/keystore/test_goldRodger--0418A658C5874D2Fe181145B685d2e73D761865D"
+// "/tmp/opbb_test/keystore/test_whiteBeard--486512fA9fbaF06568D13826afe7822842b9E685"
+func copyKeystoreFileToTestDataDirPath(dataDir string) error {
+	goldRodgerKsSrc, err := os.Open(testKeystoreGoldRodgerFile)
+	if err != nil {
+		return err
+	}
+	defer goldRodgerKsSrc.Close()
+
+	ksDir := filepath.Join(wallet.GetKeystoreDirPath(dataDir))
+	err = os.Mkdir(ksDir, 0777)
+	if err != nil {
+		return err
+	}
+
+	goldRodgerKsDst, err := os.Create(filepath.Join(ksDir, testKeystoreGoldRodgerFile))
+	if err != nil {
+		return err
+	}
+	defer goldRodgerKsDst.Close()
+
+	_, err = io.Copy(goldRodgerKsDst, goldRodgerKsSrc)
+	if err != nil {
+		return err
+	}
+
+	whiteBeardKsSrc, err := os.Open(testKeystoreWhiteBeardFile)
+	if err != nil {
+		return err
+	}
+	defer whiteBeardKsSrc.Close()
+
+	whiteBeardKsDst, err := os.Create(filepath.Join(ksDir, testKeystoreWhiteBeardFile))
+	if err != nil {
+		return err
+	}
+	defer whiteBeardKsDst.Close()
+
+	_, err = io.Copy(whiteBeardKsDst, whiteBeardKsSrc)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+// setupTestNodeDir creates a default testing node directory with 2 keystore accounts
+func setupTestDir() (dataDir string, goldRodger, whiteBeard common.Address, err error) {
+	goldRodger = database.NewAccount(testKeystoreGoldRodgerAccount)
+	whiteBeard = database.NewAccount(testKeystoreWhiteBeardAccount)
+
+	dataDir, err = getTestDataDirPath()
+	if err != nil {
+		return "", common.Address{}, common.Address{}, err
+	}
+
+	genesisBalances := make(map[common.Address]uint)
+	genesisBalances[goldRodger] = 10000000
+	genesis := database.Genesis{Balances: genesisBalances}
+	genesisJson, err := json.Marshal(genesis)
+	if err != nil {
+		return "", common.Address{}, common.Address{}, err
+	}
+
+	err = database.InitDataDirIfNotExists(dataDir, genesisJson)
+	if err != nil {
+		return "", common.Address{}, common.Address{}, err
+	}
+
+	err = copyKeystoreFileToTestDataDirPath(dataDir)
+	if err != nil {
+		return "", common.Address{}, common.Address{}, err
+	}
+	return dataDir, goldRodger, whiteBeard, nil
 }

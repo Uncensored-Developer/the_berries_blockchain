@@ -2,10 +2,15 @@ package node
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"encoding/hex"
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/crypto"
 	"kryptcoin/database"
+	"kryptcoin/wallet"
 	"testing"
-	"time"
 )
 
 func TestValidBlockHash(t *testing.T) {
@@ -31,8 +36,15 @@ func TestInvalidBlockHash(t *testing.T) {
 }
 
 func TestMine(t *testing.T) {
-	miner := database.NewAccount("gold_rodger")
-	pendingBlock := createRandomPendingBlock(miner)
+	minerPrivateKey, _, miner, err := generateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	pendingBlock, err := createRandomPendingBlock(minerPrivateKey, miner)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	ctx := context.Background()
 
@@ -50,18 +62,35 @@ func TestMine(t *testing.T) {
 		t.Fatal("Invalid block hash produced.")
 	}
 
-	if minedBlock.Header.Miner != miner {
+	if minedBlock.Header.Miner.String() != miner.String() {
 		t.Fatal("mined block miner should be the miner from pending block.")
 	}
 }
 
-func createRandomPendingBlock(miner database.Account) PendingBlock {
+func createRandomPendingBlock(privateKey *ecdsa.PrivateKey, miner common.Address) (PendingBlock, error) {
+	txn := database.NewTxn(miner, database.NewAccount(testKeystoreWhiteBeardAccount), 1, "")
+	signedTxn, err := wallet.SignTxn(txn, privateKey)
+	if err != nil {
+		return PendingBlock{}, err
+	}
 	return NewPendingBlock(
 		database.Hash{},
 		0,
 		miner,
-		[]database.Txn{
-			database.Txn{From: "gold_rodger", To: "white_beard", Value: 1, Time: uint64(time.Now().Unix())},
-		},
-	)
+		[]database.SignedTxn{signedTxn},
+	), nil
+}
+
+func generateKey() (*ecdsa.PrivateKey, ecdsa.PublicKey, common.Address, error) {
+	privateKey, err := ecdsa.GenerateKey(crypto.S256(), rand.Reader)
+	if err != nil {
+		return nil, ecdsa.PublicKey{}, common.Address{}, err
+	}
+
+	publicKey := privateKey.PublicKey
+	publicKeyBytes := elliptic.Marshal(crypto.S256(), publicKey.X, publicKey.Y)
+	publicKeyBytesHash := crypto.Keccak256(publicKeyBytes[1:])
+	account := common.BytesToAddress(publicKeyBytesHash[12:])
+
+	return privateKey, publicKey, account, nil
 }
