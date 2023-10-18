@@ -45,6 +45,10 @@ func (t Txn) Encode() ([]byte, error) {
 	return json.Marshal(t)
 }
 
+func (t Txn) TotalCost() uint {
+	return t.Value + TxnGasFee
+}
+
 func (s SignedTxn) IsAuthentic() (bool, error) {
 	txnHash, err := s.Txn.Hash()
 	if err != nil {

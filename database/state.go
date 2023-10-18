@@ -11,6 +11,8 @@ import (
 	"sort"
 )
 
+const TxnGasFee = uint(20)
+
 type State struct {
 	Balances        map[common.Address]uint
 	AccountNonces   map[common.Address]uint
@@ -211,7 +213,8 @@ func applyBlock(b Block, s *State) error {
 		return err
 	}
 
-	s.Balances[b.Header.Miner] += Reward
+	// Credit the block reward and the fees from the transactions to the miner
+	s.Balances[b.Header.Miner] += Reward + uint(len(b.Txns))*TxnGasFee
 	return nil
 }
 
@@ -225,8 +228,8 @@ func applyTxn(txn SignedTxn, s *State) error {
 	if !ok {
 		return fmt.Errorf("forged TXN, Sender %s was forged", txn.From.String())
 	}
-	expectedNonce := s.GetNextAccountNonce(txn.From)
 
+	expectedNonce := s.GetNextAccountNonce(txn.From)
 	if txn.Nonce != expectedNonce {
 		return fmt.Errorf(
 			"invalid Txn, Sender %s next nonce should be %d not %d",
@@ -235,14 +238,14 @@ func applyTxn(txn SignedTxn, s *State) error {
 			txn.Nonce,
 		)
 	}
-	if txn.Value > s.Balances[txn.From] {
+	if txn.TotalCost() > s.Balances[txn.From] {
 		return fmt.Errorf(
-			"insufficient funds; Sender (%s) balance is %d BRS, Txn cost %d BRS",
-			txn.From, s.Balances[txn.From], txn.Value,
+			"insufficient funds; Sender (%s) balance is %d OPB, Txn cost %d OPB",
+			txn.From, s.Balances[txn.From], txn.TotalCost(),
 		)
 	}
 
-	s.Balances[txn.From] -= txn.Value
+	s.Balances[txn.From] -= txn.TotalCost()
 	s.Balances[txn.To] += txn.Value
 	s.AccountNonces[txn.From] = txn.Nonce
 

@@ -58,7 +58,7 @@ func TestNode_Run(t *testing.T) {
 }
 
 func TestNode_Mining(t *testing.T) {
-	dataDir, goldRodger, whiteBeard, err := setupTestDir()
+	dataDir, goldRodger, whiteBeard, err := setupTestDir(10000000)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,7 +159,7 @@ func TestNode_Mining(t *testing.T) {
 //	WhiteBeard tries to mine 1 Txn left
 //	WhiteBeard succeeds and gets her block reward
 func TestNode_MiningStopsOnNewSyncedBlock(t *testing.T) {
-	dataDir, goldRodger, whiteBeard, err := setupTestDir()
+	dataDir, goldRodger, whiteBeard, err := setupTestDir(10000000)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -345,7 +345,7 @@ func TestNode_MiningStopsOnNewSyncedBlock(t *testing.T) {
 }
 
 func TestNode_ForgedTxn(t *testing.T) {
-	dataDir, goldRodger, whiteBeard, err := setupTestDir()
+	dataDir, goldRodger, whiteBeard, err := setupTestDir(10000000)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -434,7 +434,7 @@ func TestNode_ForgedTxn(t *testing.T) {
 }
 
 func TestNode_ReplayedTxn(t *testing.T) {
-	dataDir, goldRodger, whiteBeard, err := setupTestDir()
+	dataDir, goldRodger, whiteBeard, err := setupTestDir(10000000)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -443,13 +443,12 @@ func TestNode_ReplayedTxn(t *testing.T) {
 	n := NewNode(
 		dataDir,
 		"127.0.0.1",
-		8081,
+		8089,
 		PeerNode{},
 		goldRodger,
 	)
 
-	// Allow the mining to run for 10 minutes, worst case
-	ctx, shutDownNode := context.WithTimeout(context.Background(), time.Minute*10)
+	ctx, shutDownNode := context.WithCancel(context.Background())
 
 	goldRodgerPeerNode := NewPeerNode(
 		"127.0.0.1",
@@ -524,6 +523,124 @@ func TestNode_ReplayedTxn(t *testing.T) {
 	}
 }
 
+func TestNode_SpamTransactions(t *testing.T) {
+	goldRodgerBalance := uint(1000000)
+	whiteBeardBalance := uint(0)
+	minerBalance := uint(0)
+
+	dataDir, goldRodger, whiteBeard, err := setupTestDir(goldRodgerBalance)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dataDir)
+
+	minerKey, err := wallet.NewRandomKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	miner := minerKey.Address
+
+	n := NewNode(
+		dataDir,
+		"127.0.0.1",
+		8081,
+		PeerNode{},
+		miner,
+	)
+
+	ctx, shutDownNode := context.WithCancel(context.Background())
+	minerPeerNode := NewPeerNode(
+		"127.0.0.1",
+		8081,
+		false,
+		miner,
+		true,
+	)
+
+	amount := uint(500)
+	count := uint(4)
+
+	go func() {
+		// Wait for the node to run and initialize its state
+		time.Sleep(time.Second)
+
+		spamTxns := make([]database.SignedTxn, count)
+		now := uint64(time.Now().Unix())
+
+		for i := uint(1); i <= count; i++ {
+			txnNonce := i
+			txn := database.NewTxn(goldRodger, whiteBeard, amount, txnNonce, "")
+
+			// Ensure every Txn has a unique timestamp and the nonce 0 is the oldest
+			txn.Time = now - uint64(count-i*100)
+
+			signedTxn, err := wallet.SignWithKeystoreAccount(
+				txn,
+				goldRodger,
+				testKeystorePassword,
+				wallet.GetKeystoreDirPath(dataDir),
+			)
+			if err != nil {
+				t.Error(err)
+				return
+			}
+
+			spamTxns[i-1] = signedTxn
+		}
+
+		for _, txn := range spamTxns {
+			_ = n.AddPendingTxn(txn, minerPeerNode)
+		}
+	}()
+
+	go func() {
+		// Periodically check if we mined the block
+		ticker := time.NewTicker(time.Second * 10)
+
+		for {
+			select {
+			case <-ticker.C:
+				if !n.state.LatestBlockHash().IsEmpty() {
+					shutDownNode()
+					return
+				}
+			}
+		}
+	}()
+
+	_ = n.Run(ctx)
+
+	expectedGoldRodgerBalance := goldRodgerBalance - (count * amount) - (count * database.TxnGasFee)
+	expectedWhiteBeardBalance := whiteBeardBalance + (count * amount)
+	expectedMinerBalance := minerBalance + database.Reward + (count * database.TxnGasFee)
+
+	if n.state.Balances[whiteBeard] != expectedWhiteBeardBalance {
+		t.Errorf(
+			"white_beard balance incorrect. Expected %d, got %d",
+			expectedWhiteBeardBalance,
+			n.state.Balances[whiteBeard],
+		)
+	}
+	if n.state.Balances[goldRodger] != expectedGoldRodgerBalance {
+		t.Errorf(
+			"gold_rodger balance incorrect. Expected %d, got %d",
+			expectedGoldRodgerBalance,
+			n.state.Balances[goldRodger],
+		)
+	}
+	if n.state.Balances[miner] != expectedMinerBalance {
+		t.Errorf(
+			"miner balance incorrect. Expected %d, got %d",
+			expectedMinerBalance,
+			n.state.Balances[miner],
+		)
+	}
+
+	t.Logf("gold_rodger final balance: %d OPB", n.state.Balances[goldRodger])
+	t.Logf("white_beard final balance: %d OPB", n.state.Balances[whiteBeard])
+	t.Logf("miner final balance: %d OPB", n.state.Balances[miner])
+}
+
 // Copy the pre-generated keystore files from this folder into the new testDataDirPath()
 // Afterwards the test data_dir path will look like:
 // "/tmp/opbb_test/keystore/test_goldRodger--0418A658C5874D2Fe181145B685d2e73D761865D"
@@ -572,7 +689,7 @@ func copyKeystoreFileToTestDataDirPath(dataDir string) error {
 }
 
 // setupTestNodeDir creates a default testing node directory with 2 keystore accounts
-func setupTestDir() (dataDir string, goldRodger, whiteBeard common.Address, err error) {
+func setupTestDir(goldRodgerStartBalance uint) (dataDir string, goldRodger, whiteBeard common.Address, err error) {
 	goldRodger = database.NewAccount(testKeystoreGoldRodgerAccount)
 	whiteBeard = database.NewAccount(testKeystoreWhiteBeardAccount)
 
@@ -582,7 +699,7 @@ func setupTestDir() (dataDir string, goldRodger, whiteBeard common.Address, err 
 	}
 
 	genesisBalances := make(map[common.Address]uint)
-	genesisBalances[goldRodger] = 10000000
+	genesisBalances[goldRodger] = goldRodgerStartBalance
 	genesis := database.Genesis{Balances: genesisBalances}
 	genesisJson, err := json.Marshal(genesis)
 	if err != nil {
