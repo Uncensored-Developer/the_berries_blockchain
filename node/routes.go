@@ -5,7 +5,6 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"kryptcoin/database"
 	"kryptcoin/wallet"
-	"log"
 	"net/http"
 	"strconv"
 )
@@ -68,14 +67,17 @@ func txnAddHandler(w http.ResponseWriter, r *http.Request, node *Node) {
 		writeErrorRes(w, fmt.Errorf("'from' and 'password' fields are empty"))
 		return
 	}
+
 	fromAcct := database.NewAccount(req.From)
+	nonce := node.state.GetNextAccountNonce(fromAcct)
+
 	txn := database.NewTxn(
 		fromAcct,
 		database.NewAccount(req.To),
 		req.Value,
+		nonce,
 		req.Data,
 	)
-	log.Println(req)
 	// Decrypt private key stored in keystore file and sign the txn
 	signedTxn, err := wallet.SignWithKeystoreAccount(
 		txn,

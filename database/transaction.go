@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
-	"log"
 	"time"
 )
 
@@ -20,6 +19,7 @@ type Txn struct {
 	From  common.Address `json:"from"`
 	To    common.Address `json:"to"`
 	Value uint           `json:"value"`
+	Nonce uint           `json:"nonce"`
 	Data  string         `json:"data"`
 	Time  uint64         `json:"time"`
 }
@@ -65,14 +65,13 @@ func (s SignedTxn) IsAuthentic() (bool, error) {
 	)
 	recoveredPublicKeyBytesHash := crypto.Keccak256(recoveredPublicKeyBytes[1:])
 	recoveredAccount := common.BytesToAddress(recoveredPublicKeyBytesHash[12:])
-	log.Printf("==> %s", recoveredAccount.Hex())
-	log.Printf("==> %s", s.From.Hex())
+
 	// Compare the signature owner with txn owner
 	return recoveredAccount.Hex() == s.From.Hex(), nil
 }
 
-func NewTxn(from, to common.Address, value uint, data string) Txn {
-	return Txn{from, to, value, data, uint64(time.Now().Unix())}
+func NewTxn(from, to common.Address, value, nonce uint, data string) Txn {
+	return Txn{from, to, value, nonce, data, uint64(time.Now().Unix())}
 }
 
 func NewSignedTxn(txn Txn, sig []byte) SignedTxn {

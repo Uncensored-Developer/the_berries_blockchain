@@ -7,7 +7,6 @@ import (
 	"io"
 	"kryptcoin/database"
 	"kryptcoin/wallet"
-	"log"
 	"os"
 	"path/filepath"
 	"testing"
@@ -90,7 +89,7 @@ func TestNode_Mining(t *testing.T) {
 	// is a blocking call
 	go func() {
 		time.Sleep(time.Second * 3)
-		txn := database.NewTxn(goldRodger, whiteBeard, 1, "")
+		txn := database.NewTxn(goldRodger, whiteBeard, 1, 1, "")
 		signedTxn, err := wallet.SignWithKeystoreAccount(
 			txn,
 			goldRodger,
@@ -109,7 +108,7 @@ func TestNode_Mining(t *testing.T) {
 	// simulating that it came in while the first TXN is being mined
 	go func() {
 		time.Sleep(time.Second * 12)
-		txn := database.NewTxn(goldRodger, whiteBeard, 2, "")
+		txn := database.NewTxn(goldRodger, whiteBeard, 2, 2, "")
 		signedTxn, err := wallet.SignWithKeystoreAccount(
 			txn,
 			goldRodger,
@@ -161,9 +160,9 @@ func TestNode_Mining(t *testing.T) {
 //	WhiteBeard succeeds and gets her block reward
 func TestNode_MiningStopsOnNewSyncedBlock(t *testing.T) {
 	dataDir, goldRodger, whiteBeard, err := setupTestDir()
-
-	log.Printf("^^^^ %s", goldRodger)
-	log.Printf("^^^^ %s", whiteBeard)
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer os.RemoveAll(dataDir)
 
 	// Would be used to describe the node(local) the TXN came from
@@ -180,7 +179,7 @@ func TestNode_MiningStopsOnNewSyncedBlock(t *testing.T) {
 	// Allow the mining to run for 10 minutes, worst case
 	ctx, shutDownNode := context.WithTimeout(context.Background(), time.Minute*10)
 
-	txn1 := database.NewTxn(goldRodger, whiteBeard, 1, "")
+	txn1 := database.NewTxn(goldRodger, whiteBeard, 1, 1, "")
 	signedTxn1, err := wallet.SignWithKeystoreAccount(
 		txn1,
 		goldRodger,
@@ -190,7 +189,7 @@ func TestNode_MiningStopsOnNewSyncedBlock(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	txn2 := database.NewTxn(goldRodger, whiteBeard, 2, "")
+	txn2 := database.NewTxn(goldRodger, whiteBeard, 2, 2, "")
 	signedTxn2, err := wallet.SignWithKeystoreAccount(
 		txn2,
 		goldRodger,
@@ -240,7 +239,7 @@ func TestNode_MiningStopsOnNewSyncedBlock(t *testing.T) {
 	// Once white_beard is mining the block, simulate
 	// that gold_rodger mines the block with TXN1 faster
 	go func() {
-		time.Sleep(time.Second * (miningIntervalSeconds + 2))
+		time.Sleep(time.Second * 12)
 		if n.isMining {
 			t.Error("Node should be mining")
 			return
@@ -342,6 +341,186 @@ func TestNode_MiningStopsOnNewSyncedBlock(t *testing.T) {
 
 	if len(n.pendingTxns) != 0 {
 		t.Fatal("no pending TXNs should be left to mine")
+	}
+}
+
+func TestNode_ForgedTxn(t *testing.T) {
+	dataDir, goldRodger, whiteBeard, err := setupTestDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dataDir)
+
+	n := NewNode(
+		dataDir,
+		"127.0.0.1",
+		8081,
+		PeerNode{},
+		goldRodger,
+	)
+
+	// Allow the mining to run for 10 minutes, worst case
+	ctx, shutDownNode := context.WithTimeout(context.Background(), time.Minute*10)
+
+	goldRodgerPeerNode := NewPeerNode(
+		"127.0.0.1",
+		8081,
+		false,
+		goldRodger,
+		true,
+	)
+
+	amount := uint(5)
+	txnNonce := uint(1)
+	txn := database.NewTxn(goldRodger, whiteBeard, amount, txnNonce, "")
+
+	// Create a valid TXN sending 5 OPB tokens from gold_rodger to white_beard
+	validSignedTxn, err := wallet.SignWithKeystoreAccount(
+		txn,
+		goldRodger,
+		testKeystorePassword,
+		wallet.GetKeystoreDirPath(dataDir),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Trigger mining
+	_ = n.AddPendingTxn(validSignedTxn, goldRodgerPeerNode)
+
+	go func() {
+		ticker := time.NewTicker(time.Second * 10)
+		forgedTxnAdded := false
+		for {
+			select {
+			case <-ticker.C:
+				if !n.state.LatestBlockHash().IsEmpty() {
+					if forgedTxnAdded && !n.isMining {
+						shutDownNode()
+						return
+					}
+
+					if !forgedTxnAdded {
+						// Try to forge the same TXN but with a modified time
+						// Because the Txn.time changed, then the signature would be considered forged
+						forgedTxn := database.NewTxn(
+							goldRodger,
+							whiteBeard,
+							amount,
+							txnNonce,
+							"",
+						)
+						// Construct SignedTxn using signature from previous valid Txn
+						forgedSignedTxn := database.NewSignedTxn(forgedTxn, validSignedTxn.Sig)
+						_ = n.AddPendingTxn(forgedSignedTxn, goldRodgerPeerNode)
+
+						forgedTxnAdded = true
+
+						time.Sleep(time.Second * 13)
+					}
+				}
+			}
+		}
+	}()
+
+	_ = n.Run(ctx)
+	if n.state.LatestBlock().Header.Height != 0 {
+		t.Fatal("should mine only one Txn since the second Txn was forged.")
+	}
+
+	if n.state.Balances[whiteBeard] != amount {
+		t.Fatalf("forged Txn succeeded")
+	}
+}
+
+func TestNode_ReplayedTxn(t *testing.T) {
+	dataDir, goldRodger, whiteBeard, err := setupTestDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dataDir)
+
+	n := NewNode(
+		dataDir,
+		"127.0.0.1",
+		8081,
+		PeerNode{},
+		goldRodger,
+	)
+
+	// Allow the mining to run for 10 minutes, worst case
+	ctx, shutDownNode := context.WithTimeout(context.Background(), time.Minute*10)
+
+	goldRodgerPeerNode := NewPeerNode(
+		"127.0.0.1",
+		8081,
+		false,
+		goldRodger,
+		true,
+	)
+	whiteBeardPeerNode := NewPeerNode(
+		"127.0.0.1",
+		8082,
+		false,
+		whiteBeard,
+		true,
+	)
+
+	amount := uint(5)
+	txnNonce := uint(1)
+	txn := database.NewTxn(goldRodger, whiteBeard, amount, txnNonce, "")
+
+	// Create a valid TXN sending 5 OPB tokens from gold_rodger to white_beard
+	validSignedTxn, err := wallet.SignWithKeystoreAccount(
+		txn,
+		goldRodger,
+		testKeystorePassword,
+		wallet.GetKeystoreDirPath(dataDir),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_ = n.AddPendingTxn(validSignedTxn, goldRodgerPeerNode)
+
+	go func() {
+		ticker := time.NewTicker(time.Second * 10)
+		replayedTxnAdded := false
+
+		for {
+			select {
+			case <-ticker.C:
+				if !n.state.LatestBlockHash().IsEmpty() {
+					if replayedTxnAdded && !n.isMining {
+						shutDownNode()
+						return
+					}
+
+					// gold_rodger's original Txn got mined
+					// Execute the attack by replaying the Txn again
+					if !replayedTxnAdded {
+						// Simulate the Txn was sent to a different node
+						n.archivedTxns = make(map[string]database.SignedTxn)
+
+						_ = n.AddPendingTxn(validSignedTxn, whiteBeardPeerNode)
+						replayedTxnAdded = true
+
+						time.Sleep(time.Second * 13)
+					}
+				}
+
+			}
+		}
+	}()
+
+	_ = n.Run(ctx)
+
+	if n.state.Balances[whiteBeard] == amount*2 {
+		t.Fatalf("replayed attack was successful")
+	}
+
+	if n.state.LatestBlock().Header.Height == 1 {
+		t.Fatalf("only the 1st block should be saved since the 2nd block contains a malicious Txn")
 	}
 }
 

@@ -13,6 +13,7 @@ import (
 
 type State struct {
 	Balances        map[common.Address]uint
+	AccountNonces   map[common.Address]uint
 	dbFile          *os.File
 	latestBlock     Block
 	latestBlockHash Hash
@@ -34,6 +35,10 @@ func (s *State) NextBlockHeight() uint64 {
 	return s.latestBlock.Header.Height + 1
 }
 
+func (s *State) GetNextAccountNonce(account common.Address) uint {
+	return s.AccountNonces[account] + 1
+}
+
 func NewStateFromDisk(dataDir string) (*State, error) {
 	err := InitDataDirIfNotExists(dataDir, []byte(genesisJson))
 	if err != nil {
@@ -50,13 +55,22 @@ func NewStateFromDisk(dataDir string) (*State, error) {
 		balances[account] = balance
 	}
 
+	accountNonces := make(map[common.Address]uint)
+
 	f, err := os.OpenFile(getBlocksDbFilePath(dataDir), os.O_APPEND|os.O_RDWR, 0600)
 	if err != nil {
 		return nil, err
 	}
 
 	scanner := bufio.NewScanner(f)
-	state := &State{balances, f, Block{}, Hash{}, false}
+	state := &State{
+		balances,
+		accountNonces,
+		f,
+		Block{},
+		Hash{},
+		false,
+	}
 
 	//loop over each of the txn line in the txn.db file
 	for scanner.Scan() {
@@ -105,9 +119,14 @@ func (s *State) copy() State {
 	c.latestBlock = s.latestBlock
 	c.latestBlockHash = s.latestBlockHash
 	c.Balances = make(map[common.Address]uint)
+	c.AccountNonces = make(map[common.Address]uint)
 
 	for acct, balance := range s.Balances {
 		c.Balances[acct] = balance
+	}
+
+	for acct, nonce := range s.AccountNonces {
+		c.AccountNonces[acct] = nonce
 	}
 
 	return c
@@ -141,6 +160,7 @@ func (s *State) AddBlock(b Block) (Hash, error) {
 	}
 
 	s.Balances = pendingState.Balances
+	s.AccountNonces = pendingState.AccountNonces
 	s.latestBlockHash = blockHash
 	s.latestBlock = b
 	s.hasGenesisBlock = true
@@ -205,6 +225,16 @@ func applyTxn(txn SignedTxn, s *State) error {
 	if !ok {
 		return fmt.Errorf("forged TXN, Sender %s was forged", txn.From.String())
 	}
+	expectedNonce := s.GetNextAccountNonce(txn.From)
+
+	if txn.Nonce != expectedNonce {
+		return fmt.Errorf(
+			"invalid Txn, Sender %s next nonce should be %d not %d",
+			txn.From.String(),
+			expectedNonce,
+			txn.Nonce,
+		)
+	}
 	if txn.Value > s.Balances[txn.From] {
 		return fmt.Errorf(
 			"insufficient funds; Sender (%s) balance is %d BRS, Txn cost %d BRS",
@@ -214,6 +244,7 @@ func applyTxn(txn SignedTxn, s *State) error {
 
 	s.Balances[txn.From] -= txn.Value
 	s.Balances[txn.To] += txn.Value
+	s.AccountNonces[txn.From] = txn.Nonce
 
 	return nil
 }

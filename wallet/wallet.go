@@ -9,7 +9,6 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
 	"kryptcoin/database"
-	"log"
 	"os"
 	"path/filepath"
 )
@@ -50,17 +49,16 @@ func Verify(msg, sig []byte) (*ecdsa.PublicKey, error) {
 
 func SignWithKeystoreAccount(txn database.Txn, acct common.Address, password, keystoreDir string) (database.SignedTxn, error) {
 	ks := keystore.NewKeyStore(keystoreDir, keystore.StandardScryptN, keystore.StandardScryptP)
-	log.Printf("^^: %s", keystoreDir)
 	ksAccount, err := ks.Find(accounts.Account{Address: acct})
 	if err != nil {
 		return database.SignedTxn{}, err
 	}
-	log.Printf("^^: %s", password)
+
 	ksAccountJson, err := os.ReadFile(ksAccount.URL.Path)
 	if err != nil {
 		return database.SignedTxn{}, err
 	}
-	log.Printf("^^^: %s", password)
+
 	key, err := keystore.DecryptKey(ksAccountJson, password)
 	if err != nil {
 		return database.SignedTxn{}, err
