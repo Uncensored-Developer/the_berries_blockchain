@@ -58,7 +58,7 @@ func TestNode_Run(t *testing.T) {
 }
 
 func TestNode_Mining(t *testing.T) {
-	dataDir, goldRodger, whiteBeard, err := setupTestDir(10000000)
+	dataDir, goldRodger, whiteBeard, err := setupTestDir(10_000_000)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,7 +159,7 @@ func TestNode_Mining(t *testing.T) {
 //	WhiteBeard tries to mine 1 Txn left
 //	WhiteBeard succeeds and gets her block reward
 func TestNode_MiningStopsOnNewSyncedBlock(t *testing.T) {
-	dataDir, goldRodger, whiteBeard, err := setupTestDir(10000000)
+	dataDir, goldRodger, whiteBeard, err := setupTestDir(10_000_000)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -345,7 +345,7 @@ func TestNode_MiningStopsOnNewSyncedBlock(t *testing.T) {
 }
 
 func TestNode_ForgedTxn(t *testing.T) {
-	dataDir, goldRodger, whiteBeard, err := setupTestDir(10000000)
+	dataDir, goldRodger, whiteBeard, err := setupTestDir(10_000_000)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -434,7 +434,7 @@ func TestNode_ForgedTxn(t *testing.T) {
 }
 
 func TestNode_ReplayedTxn(t *testing.T) {
-	dataDir, goldRodger, whiteBeard, err := setupTestDir(10000000)
+	dataDir, goldRodger, whiteBeard, err := setupTestDir(10_000_000)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -524,7 +524,7 @@ func TestNode_ReplayedTxn(t *testing.T) {
 }
 
 func TestNode_SpamTransactions(t *testing.T) {
-	goldRodgerBalance := uint(1000000)
+	goldRodgerBalance := uint(1_000_000)
 	whiteBeardBalance := uint(0)
 	minerBalance := uint(0)
 

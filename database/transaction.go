@@ -16,12 +16,16 @@ func NewAccount(value string) common.Address {
 }
 
 type Txn struct {
-	From  common.Address `json:"from"`
-	To    common.Address `json:"to"`
-	Value uint           `json:"value"`
-	Nonce uint           `json:"nonce"`
-	Data  string         `json:"data"`
-	Time  uint64         `json:"time"`
+	From common.Address `json:"from"`
+	To   common.Address `json:"to"`
+
+	Gas      uint `json:"gas"`
+	GasPrice uint `json:"gasPrice"`
+
+	Value uint   `json:"value"`
+	Nonce uint   `json:"nonce"`
+	Data  string `json:"data"`
+	Time  uint64 `json:"time"`
 }
 
 type SignedTxn struct {

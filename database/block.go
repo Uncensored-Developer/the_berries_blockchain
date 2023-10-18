@@ -10,6 +10,7 @@ import (
 )
 
 const Reward = 100
+const blockDifficulty = 3
 
 type Hash [32]byte
 
@@ -67,5 +68,5 @@ func IsBlockHashValid(hash Hash) bool {
 
 	re := regexp.MustCompile(pattern)
 	match := re.FindString(hexHash)
-	return len(match) == 3
+	return len(match) == blockDifficulty
 }

@@ -19,8 +19,12 @@ type BalancesResponse struct {
 }
 
 type TxnAddReq struct {
-	From     string `json:"from"`
-	To       string `json:"to"`
+	From string `json:"from"`
+	To   string `json:"to"`
+
+	Gas      uint `json:"gas"`
+	GasPrice uint `json:"gasPrice"`
+
 	Password string `json:"password"`
 	Value    uint   `json:"value"`
 	Data     string `json:"data"`
