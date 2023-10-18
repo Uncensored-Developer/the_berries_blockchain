@@ -4,13 +4,16 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"github.com/ethereum/go-ethereum/common"
+	"log"
 	"os"
 	"reflect"
 	"sort"
 )
 
 type State struct {
-	Balances        map[Account]uint
+	Balances        map[common.Address]uint
+	AccountNonces   map[common.Address]uint
 	dbFile          *os.File
 	latestBlock     Block
 	latestBlockHash Hash
@@ -32,8 +35,12 @@ func (s *State) NextBlockHeight() uint64 {
 	return s.latestBlock.Header.Height + 1
 }
 
+func (s *State) GetNextAccountNonce(account common.Address) uint {
+	return s.AccountNonces[account] + 1
+}
+
 func NewStateFromDisk(dataDir string) (*State, error) {
-	err := initDataDirIfNotExists(dataDir)
+	err := InitDataDirIfNotExists(dataDir, []byte(genesisJson))
 	if err != nil {
 		return nil, err
 	}
@@ -43,10 +50,12 @@ func NewStateFromDisk(dataDir string) (*State, error) {
 		return nil, err
 	}
 
-	balances := make(map[Account]uint)
+	balances := make(map[common.Address]uint)
 	for account, balance := range genesis.Balances {
 		balances[account] = balance
 	}
+
+	accountNonces := make(map[common.Address]uint)
 
 	f, err := os.OpenFile(getBlocksDbFilePath(dataDir), os.O_APPEND|os.O_RDWR, 0600)
 	if err != nil {
@@ -54,7 +63,14 @@ func NewStateFromDisk(dataDir string) (*State, error) {
 	}
 
 	scanner := bufio.NewScanner(f)
-	state := &State{balances, f, Block{}, Hash{}, false}
+	state := &State{
+		balances,
+		accountNonces,
+		f,
+		Block{},
+		Hash{},
+		false,
+	}
 
 	//loop over each of the txn line in the txn.db file
 	for scanner.Scan() {
@@ -69,7 +85,7 @@ func NewStateFromDisk(dataDir string) (*State, error) {
 			return nil, err
 		}
 
-		err = applyTxns(blockFs.Value.Txns, state)
+		err = applyBlock(blockFs.Value, state)
 		if err != nil {
 			return nil, err
 		}
@@ -102,10 +118,15 @@ func (s *State) copy() State {
 	c.hasGenesisBlock = s.hasGenesisBlock
 	c.latestBlock = s.latestBlock
 	c.latestBlockHash = s.latestBlockHash
-	c.Balances = make(map[Account]uint)
+	c.Balances = make(map[common.Address]uint)
+	c.AccountNonces = make(map[common.Address]uint)
 
 	for acct, balance := range s.Balances {
 		c.Balances[acct] = balance
+	}
+
+	for acct, nonce := range s.AccountNonces {
+		c.AccountNonces[acct] = nonce
 	}
 
 	return c
@@ -130,8 +151,8 @@ func (s *State) AddBlock(b Block) (Hash, error) {
 		return Hash{}, err
 	}
 
-	fmt.Println("Saving new Block to disk:")
-	fmt.Printf("\t%s\n", blockFsJson)
+	log.Println("Saving new Block to disk:")
+	log.Printf("\t%s\n", blockFsJson)
 
 	_, err = s.dbFile.Write(append(blockFsJson, '\n'))
 	if err != nil {
@@ -139,6 +160,7 @@ func (s *State) AddBlock(b Block) (Hash, error) {
 	}
 
 	s.Balances = pendingState.Balances
+	s.AccountNonces = pendingState.AccountNonces
 	s.latestBlockHash = blockHash
 	s.latestBlock = b
 	s.hasGenesisBlock = true
@@ -193,7 +215,26 @@ func applyBlock(b Block, s *State) error {
 	return nil
 }
 
-func applyTxn(txn Txn, s *State) error {
+func applyTxn(txn SignedTxn, s *State) error {
+	// Verify the TXN was not forged
+	ok, err := txn.IsAuthentic()
+	if err != nil {
+		return err
+	}
+
+	if !ok {
+		return fmt.Errorf("forged TXN, Sender %s was forged", txn.From.String())
+	}
+	expectedNonce := s.GetNextAccountNonce(txn.From)
+
+	if txn.Nonce != expectedNonce {
+		return fmt.Errorf(
+			"invalid Txn, Sender %s next nonce should be %d not %d",
+			txn.From.String(),
+			expectedNonce,
+			txn.Nonce,
+		)
+	}
 	if txn.Value > s.Balances[txn.From] {
 		return fmt.Errorf(
 			"insufficient funds; Sender (%s) balance is %d BRS, Txn cost %d BRS",
@@ -203,11 +244,12 @@ func applyTxn(txn Txn, s *State) error {
 
 	s.Balances[txn.From] -= txn.Value
 	s.Balances[txn.To] += txn.Value
+	s.AccountNonces[txn.From] = txn.Nonce
 
 	return nil
 }
 
-func applyTxns(txns []Txn, s *State) error {
+func applyTxns(txns []SignedTxn, s *State) error {
 	sort.Slice(txns, func(i, j int) bool {
 		return txns[i].Time < txns[j].Time
 	})

@@ -2,7 +2,9 @@ package node
 
 import (
 	"fmt"
+	"github.com/ethereum/go-ethereum/common"
 	"kryptcoin/database"
+	"kryptcoin/wallet"
 	"net/http"
 	"strconv"
 )
@@ -12,15 +14,16 @@ type ErrorResponse struct {
 }
 
 type BalancesResponse struct {
-	Hash     database.Hash             `json:"block_hash"`
-	Balances map[database.Account]uint `json:"balances"`
+	Hash     database.Hash           `json:"block_hash"`
+	Balances map[common.Address]uint `json:"balances"`
 }
 
 type TxnAddReq struct {
-	From  string `json:"from"`
-	To    string `json:"to"`
-	Value uint   `json:"value"`
-	Data  string `json:"data"`
+	From     string `json:"from"`
+	To       string `json:"to"`
+	Password string `json:"password"`
+	Value    uint   `json:"value"`
+	Data     string `json:"data"`
 }
 
 type TxnAddRes struct {
@@ -60,15 +63,34 @@ func txnAddHandler(w http.ResponseWriter, r *http.Request, node *Node) {
 		writeErrorRes(w, err)
 		return
 	}
+	if req.From == "" || req.Password == "" {
+		writeErrorRes(w, fmt.Errorf("'from' and 'password' fields are empty"))
+		return
+	}
+
+	fromAcct := database.NewAccount(req.From)
+	nonce := node.state.GetNextAccountNonce(fromAcct)
 
 	txn := database.NewTxn(
-		database.NewAccount(req.From),
+		fromAcct,
 		database.NewAccount(req.To),
 		req.Value,
+		nonce,
 		req.Data,
 	)
+	// Decrypt private key stored in keystore file and sign the txn
+	signedTxn, err := wallet.SignWithKeystoreAccount(
+		txn,
+		fromAcct,
+		req.Password,
+		wallet.GetKeystoreDirPath(node.dataDir),
+	)
+	if err != nil {
+		writeErrorRes(w, err)
+		return
+	}
 
-	err = node.AddPendingTxn(txn, node.info)
+	err = node.AddPendingTxn(signedTxn, node.info)
 	if err != nil {
 		writeErrorRes(w, err)
 		return
@@ -96,7 +118,7 @@ func addPeerHandler(w http.ResponseWriter, r *http.Request, node *Node) {
 		return
 	}
 
-	peer := NewPeerNode(peerIP, peerPort, false, database.Account(minerRaw), true)
+	peer := NewPeerNode(peerIP, peerPort, false, database.NewAccount(minerRaw), true)
 	node.AddPeer(peer)
 
 	fmt.Printf("Peer %s was added into KnownPeers\n", peer.TcpAddress())

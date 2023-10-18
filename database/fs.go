@@ -21,7 +21,7 @@ func writeEmptyBlocksDbToDisk(path string) error {
 	return os.WriteFile(path, []byte(""), os.ModePerm)
 }
 
-func initDataDirIfNotExists(dataDir string) error {
+func InitDataDirIfNotExists(dataDir string, genesis []byte) error {
 	if fileExist(getGenesisJsonFilePath(dataDir)) {
 		return nil
 	}
@@ -31,8 +31,8 @@ func initDataDirIfNotExists(dataDir string) error {
 		return err
 	}
 
-	gen := getGenesisJsonFilePath(dataDir)
-	if err := writeGenesisToDisk(gen); err != nil {
+	genFilePath := getGenesisJsonFilePath(dataDir)
+	if err := writeGenesisToDisk(genFilePath, genesis); err != nil {
 		return err
 	}
 

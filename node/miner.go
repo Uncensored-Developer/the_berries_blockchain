@@ -3,6 +3,7 @@ package node
 import (
 	"context"
 	"fmt"
+	"github.com/ethereum/go-ethereum/common"
 	"kryptcoin/database"
 	"kryptcoin/fs"
 	"log"
@@ -14,11 +15,11 @@ type PendingBlock struct {
 	parent database.Hash
 	height uint64
 	time   uint64
-	miner  database.Account
-	txns   []database.Txn
+	miner  common.Address
+	txns   []database.SignedTxn
 }
 
-func NewPendingBlock(parent database.Hash, height uint64, miner database.Account, txns []database.Txn) PendingBlock {
+func NewPendingBlock(parent database.Hash, height uint64, miner common.Address, txns []database.SignedTxn) PendingBlock {
 	return PendingBlock{parent, height, uint64(time.Now().Unix()), miner, txns}
 }
 
