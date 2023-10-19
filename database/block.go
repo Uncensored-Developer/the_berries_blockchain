@@ -61,6 +61,14 @@ func (b Block) Hash() (Hash, error) {
 	return sha256.Sum256(blockJson), nil
 }
 
+func (b Block) GasReward() uint {
+	reward := uint(0)
+	for _, txn := range b.Txns {
+		reward += txn.GasCost()
+	}
+	return reward
+}
+
 // IsBlockHashValid Validates that the block hash starts with 2 leading zeros
 func IsBlockHashValid(hash Hash) bool {
 	hexHash := hash.Hex()

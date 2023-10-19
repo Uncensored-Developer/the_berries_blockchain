@@ -68,7 +68,7 @@ func TestMine(t *testing.T) {
 }
 
 func createRandomPendingBlock(privateKey *ecdsa.PrivateKey, miner common.Address) (PendingBlock, error) {
-	txn := database.NewTxn(miner, database.NewAccount(testKeystoreWhiteBeardAccount), 1, 1, "")
+	txn := database.NewDefaultTxn(miner, database.NewAccount(testKeystoreWhiteBeardAccount), 1, 1, "")
 	signedTxn, err := wallet.SignTxn(txn, privateKey)
 	if err != nil {
 		return PendingBlock{}, err

@@ -8,15 +8,19 @@ import (
 
 type Genesis struct {
 	Balances map[common.Address]uint `json:"balances"`
+	Symbol   string                  `json:"symbol"`
+	ForkOIP1 uint64                  `json:"fork_oip_1"`
 }
 
 var genesisJson = `
 {
   "genesis_time": "2022-04-19T00:00:00.000000000Z",
   "chain_id": "the-one-piece-berries-ledger",
+  "symbol": "OPB",
   "balances": {
     "0x0418A658C5874D2Fe181145B685d2e73D761865D": 1000000
-  }
+  },
+  "fork_oip_1": 10
 }
 `
 

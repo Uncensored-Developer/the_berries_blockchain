@@ -51,7 +51,16 @@ func (n *Node) syncBlocks(peer PeerNode, status StatusRes) error {
 		fmt.Println(err)
 		return err
 	}
-	return n.state.AddBlocks(blocks)
+
+	for _, block := range blocks {
+		err = n.addBlock(block)
+		if err != nil {
+			return err
+		}
+		n.newSyncedBlocks <- block
+	}
+
+	return nil
 }
 
 func (n *Node) syncKnownPeers(status StatusRes) error {
@@ -93,6 +102,12 @@ func (n *Node) doSync() {
 		}
 
 		err = n.syncKnownPeers(status)
+		if err != nil {
+			fmt.Printf("ERROR: %s\n", err)
+			continue
+		}
+
+		err = n.syncPendingTxns(peer, status.PendingTxns)
 		if err != nil {
 			fmt.Printf("ERROR: %s\n", err)
 			continue

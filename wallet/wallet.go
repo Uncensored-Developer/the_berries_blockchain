@@ -86,3 +86,16 @@ func NewRandomKey() (*keystore.Key, error) {
 	}
 	return key, nil
 }
+
+func NewKeystoreAccount(dataDir, password string) (common.Address, error) {
+	ks := keystore.NewKeyStore(
+		GetKeystoreDirPath(dataDir),
+		keystore.StandardScryptN,
+		keystore.StandardScryptP,
+	)
+	acc, err := ks.NewAccount(password)
+	if err != nil {
+		return common.Address{}, err
+	}
+	return acc.Address, nil
+}

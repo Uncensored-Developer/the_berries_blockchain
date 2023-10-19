@@ -13,9 +13,11 @@ import (
 )
 
 const (
-	DefaultHTTPPort = 8081
-	DefaultIP       = "127.0.0.1"
-	DefaultMiner    = "0x0000000000000000000000000000000000000000"
+	DefaultHTTPPort     = 8081
+	DefaultIP           = "127.0.0.1"
+	DefaultMiner        = "0x0000000000000000000000000000000000000000"
+	DefaultBootstrapAcc = "0x0418A658C5874D2Fe181145B685d2e73D761865D"
+	DefaultBootstrapIp  = "127.0.0.1"
 
 	pathNodeStatus = "/node/status"
 	pathNodeSync   = "/node/sync"
@@ -42,7 +44,9 @@ type Node struct {
 	dataDir string
 	info    PeerNode
 
-	state           *database.State // To inject the State into the HTTP handlers
+	state        *database.State // Main blockchain state after mined Txns have been applied
+	pendingState *database.State // temporary pending state to validate new incoming Txns, resets after block is mined
+
 	knownPeers      map[string]PeerNode
 	pendingTxns     map[string]database.SignedTxn
 	archivedTxns    map[string]database.SignedTxn
@@ -103,6 +107,8 @@ func (n *Node) Run(ctx context.Context) error {
 	defer state.Close()
 
 	n.state = state
+	pendingState := state.Copy()
+	n.pendingState = &pendingState
 
 	fmt.Println("Blockchain state:")
 	fmt.Printf("	- height: %d\n", n.state.LatestBlock().Header.Height)
@@ -200,10 +206,11 @@ func (n *Node) minePendingTxns(ctx context.Context) error {
 	}
 	n.removeMinedPendingTxns(minedBlock)
 
-	_, err = n.state.AddBlock(minedBlock)
+	err = n.addBlock(minedBlock)
 	if err != nil {
 		return err
 	}
+
 	return nil
 }
 
@@ -244,6 +251,11 @@ func (n *Node) AddPendingTxn(txn database.SignedTxn, peer PeerNode) error {
 		return err
 	}
 
+	err = database.ApplyTxn(txn, n.pendingState)
+	if err != nil {
+		return err
+	}
+
 	_, isPending := n.pendingTxns[txnHash.Hex()]
 	_, isArchived := n.archivedTxns[txnHash.Hex()]
 
@@ -252,5 +264,28 @@ func (n *Node) AddPendingTxn(txn database.SignedTxn, peer PeerNode) error {
 		n.newPendingTxns <- txn
 		log.Printf("Added pending TXN %s from Peer %s\n", txnJson, peer.TcpAddress())
 	}
+	return nil
+}
+
+func (n *Node) syncPendingTxns(peer PeerNode, txns []database.SignedTxn) error {
+	for _, txn := range txns {
+		err := n.AddPendingTxn(txn, peer)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (n *Node) addBlock(block database.Block) error {
+	_, err := n.state.AddBlock(block)
+	if err != nil {
+		return err
+	}
+
+	// Reset pending state
+	pendingState := n.state.Copy()
+	n.pendingState = &pendingState
+
 	return nil
 }

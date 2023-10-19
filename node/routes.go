@@ -44,7 +44,7 @@ type StatusRes struct {
 	KnownPeers map[string]PeerNode `json:"known_peers"`
 
 	// Exchange pending TXNs as part of the periodic Sync() interval
-	PendingTxns []database.Txn `json:"pending_txns"`
+	PendingTxns []database.SignedTxn `json:"pending_txns"`
 }
 
 type SyncRes struct {
@@ -75,7 +75,7 @@ func txnAddHandler(w http.ResponseWriter, r *http.Request, node *Node) {
 	fromAcct := database.NewAccount(req.From)
 	nonce := node.state.GetNextAccountNonce(fromAcct)
 
-	txn := database.NewTxn(
+	txn := database.NewDefaultTxn(
 		fromAcct,
 		database.NewAccount(req.To),
 		req.Value,

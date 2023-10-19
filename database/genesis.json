@@ -1,7 +1,9 @@
 {
   "genesis_time": "2022-04-19T00:00:00.000000000Z",
-  "chain_id": "the-berries-ledger",
+  "chain_id": "the-one-piece-berries-ledger",
+  "symbol": "OPB",
   "balances": {
-    "gold_rodger": 1000000
-  }
+    "0x0418A658C5874D2Fe181145B685d2e73D761865D": 1000000
+  },
+  "fork_oip_1": 10
 }

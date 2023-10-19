@@ -11,6 +11,9 @@ const flagIP = "ip"
 const flagPort = "port"
 const flagMiner = "miner"
 const flagKeystoreFile = "keystore"
+const flagBootstrapAcct = "bootstrap_account"
+const flagBootstrapIp = "bootstrap_ip"
+const flagBootstrapPort = "bootstrap_port"
 
 func main() {
 	tbbCmd := &cobra.Command{
@@ -21,7 +24,6 @@ func main() {
 		},
 	}
 
-	tbbCmd.AddCommand(versionCmd)
 	tbbCmd.AddCommand(getBalancesCmd())
 	tbbCmd.AddCommand(getRunCmd())
 	tbbCmd.AddCommand(walletCmd())

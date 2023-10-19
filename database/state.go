@@ -11,7 +11,11 @@ import (
 	"sort"
 )
 
-const TxnGasFee = uint(20)
+const (
+	TxnFee          = uint(20)
+	TxnGas          = 10
+	DefaultGasPrice = 1
+)
 
 type State struct {
 	Balances        map[common.Address]uint
@@ -20,6 +24,10 @@ type State struct {
 	latestBlock     Block
 	latestBlockHash Hash
 	hasGenesisBlock bool
+	forkOIP1        uint64
+
+	HeightCache map[uint64]int64
+	HashCache   map[string]int64
 }
 
 func (s *State) LatestBlockHash() Hash {
@@ -39,6 +47,11 @@ func (s *State) NextBlockHeight() uint64 {
 
 func (s *State) GetNextAccountNonce(account common.Address) uint {
 	return s.AccountNonces[account] + 1
+}
+
+func (s *State) IsForkOIP1() bool {
+	log.Printf("GASS: %d, %d", s.NextBlockHeight(), s.forkOIP1)
+	return s.NextBlockHeight() >= s.forkOIP1
 }
 
 func NewStateFromDisk(dataDir string) (*State, error) {
@@ -72,8 +85,12 @@ func NewStateFromDisk(dataDir string) (*State, error) {
 		Block{},
 		Hash{},
 		false,
+		genesis.ForkOIP1,
+		map[uint64]int64{},
+		map[string]int64{},
 	}
 
+	filePos := int64(0)
 	//loop over each of the txn line in the txn.db file
 	for scanner.Scan() {
 		if err := scanner.Err(); err != nil {
@@ -95,6 +112,11 @@ func NewStateFromDisk(dataDir string) (*State, error) {
 		state.latestBlockHash = blockFs.Key
 		state.latestBlock = blockFs.Value
 		state.hasGenesisBlock = true
+
+		// Set caches
+		state.HashCache[blockFs.Key.Hex()] = filePos
+		state.HeightCache[blockFs.Value.Header.Height] = filePos
+		filePos += int64(len(blockFsJson)) + 1
 	}
 	return state, nil
 }
@@ -115,13 +137,14 @@ func (s *State) apply(txn Txn) error {
 	return nil
 }
 
-func (s *State) copy() State {
+func (s *State) Copy() State {
 	c := State{}
 	c.hasGenesisBlock = s.hasGenesisBlock
 	c.latestBlock = s.latestBlock
 	c.latestBlockHash = s.latestBlockHash
 	c.Balances = make(map[common.Address]uint)
 	c.AccountNonces = make(map[common.Address]uint)
+	c.forkOIP1 = s.forkOIP1
 
 	for acct, balance := range s.Balances {
 		c.Balances[acct] = balance
@@ -135,7 +158,7 @@ func (s *State) copy() State {
 }
 
 func (s *State) AddBlock(b Block) (Hash, error) {
-	pendingState := s.copy()
+	pendingState := s.Copy()
 
 	err := applyBlock(b, &pendingState)
 	if err != nil {
@@ -156,6 +179,10 @@ func (s *State) AddBlock(b Block) (Hash, error) {
 	log.Println("Saving new Block to disk:")
 	log.Printf("\t%s\n", blockFsJson)
 
+	// get file position for cache
+	fs, _ := s.dbFile.Stat()
+	filePos := fs.Size() + 1
+
 	_, err = s.dbFile.Write(append(blockFsJson, '\n'))
 	if err != nil {
 		return Hash{}, err
@@ -166,6 +193,10 @@ func (s *State) AddBlock(b Block) (Hash, error) {
 	s.latestBlockHash = blockHash
 	s.latestBlock = b
 	s.hasGenesisBlock = true
+
+	// Set search caches
+	s.HashCache[blockFs.Key.Hex()] = filePos
+	s.HeightCache[blockFs.Value.Header.Height] = filePos
 
 	return blockHash, nil
 }
@@ -214,11 +245,16 @@ func applyBlock(b Block, s *State) error {
 	}
 
 	// Credit the block reward and the fees from the transactions to the miner
-	s.Balances[b.Header.Miner] += Reward + uint(len(b.Txns))*TxnGasFee
+	s.Balances[b.Header.Miner] += Reward
+	if s.IsForkOIP1() {
+		s.Balances[b.Header.Miner] += b.GasReward()
+	} else {
+		s.Balances[b.Header.Miner] += uint(len(b.Txns)) * TxnFee
+	}
 	return nil
 }
 
-func applyTxn(txn SignedTxn, s *State) error {
+func ApplyTxn(txn SignedTxn, s *State) error {
 	// Verify the TXN was not forged
 	ok, err := txn.IsAuthentic()
 	if err != nil {
@@ -238,14 +274,27 @@ func applyTxn(txn SignedTxn, s *State) error {
 			txn.Nonce,
 		)
 	}
-	if txn.TotalCost() > s.Balances[txn.From] {
-		return fmt.Errorf(
-			"insufficient funds; Sender (%s) balance is %d OPB, Txn cost %d OPB",
-			txn.From, s.Balances[txn.From], txn.TotalCost(),
-		)
+
+	if s.IsForkOIP1() {
+		if txn.Gas != TxnGas {
+			return fmt.Errorf("insufficient Txn gas, requires %d got %d", TxnGas, txn.Gas)
+		}
+		if txn.GasPrice < DefaultGasPrice {
+			return fmt.Errorf("insufficient Txn gas price, requires at least %d", DefaultGasPrice)
+		}
+	} else {
+		// Prior to OIP1, s signed Txn must not populate gas and gasPrice field to prevent
+		// consensus from crashing
+		if txn.Gas != 0 || txn.GasPrice != 0 {
+			return fmt.Errorf("invalid Txn, Gas and GasPrice cannot be populated before OIP1 fork")
+		}
 	}
 
-	s.Balances[txn.From] -= txn.TotalCost()
+	if txn.TotalCost(s.IsForkOIP1()) > s.Balances[txn.From] {
+		return fmt.Errorf("account %s has insufficient balance for %d", txn.From, txn.Value)
+	}
+
+	s.Balances[txn.From] -= txn.TotalCost(s.IsForkOIP1())
 	s.Balances[txn.To] += txn.Value
 	s.AccountNonces[txn.From] = txn.Nonce
 
@@ -257,7 +306,7 @@ func applyTxns(txns []SignedTxn, s *State) error {
 		return txns[i].Time < txns[j].Time
 	})
 	for _, txn := range txns {
-		err := applyTxn(txn, s)
+		err := ApplyTxn(txn, s)
 		if err != nil {
 			return err
 		}
