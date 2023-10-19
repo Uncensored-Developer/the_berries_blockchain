@@ -150,7 +150,7 @@ func syncHandler(w http.ResponseWriter, r *http.Request, node *Node) {
 	writeRes(w, SyncRes{Blocks: blocks})
 }
 
-func getBlockByHashOrHeight(w http.ResponseWriter, r *http.Request, node *Node) {
+func getBlockByHashOrHeightHandler(w http.ResponseWriter, r *http.Request, node *Node) {
 	errorRequiredParams := errors.New("height or hash parameter is required")
 
 	params := strings.Split(r.URL.Path, "/")[1:]
@@ -177,4 +177,8 @@ func getBlockByHashOrHeight(w http.ResponseWriter, r *http.Request, node *Node) 
 	}
 
 	writeRes(w, block)
+}
+
+func listMempoolTxnsHandler(w http.ResponseWriter, r *http.Request, txns map[string]database.SignedTxn) {
+	writeRes(w, txns)
 }

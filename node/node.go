@@ -140,7 +140,11 @@ func (n *Node) Run(ctx context.Context) error {
 	})
 
 	handler.HandleFunc("/block/", func(w http.ResponseWriter, req *http.Request) {
-		getBlockByHashOrHeight(w, req, n)
+		getBlockByHashOrHeightHandler(w, req, n)
+	})
+
+	handler.HandleFunc("/mempool/", func(w http.ResponseWriter, req *http.Request) {
+		listMempoolTxnsHandler(w, req, n.pendingTxns)
 	})
 
 	server := &http.Server{Addr: fmt.Sprintf(":%d", n.info.Port), Handler: handler}
