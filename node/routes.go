@@ -1,12 +1,14 @@
 package node
 
 import (
+	"errors"
 	"fmt"
 	"github.com/ethereum/go-ethereum/common"
 	"kryptcoin/database"
 	"kryptcoin/wallet"
 	"net/http"
 	"strconv"
+	"strings"
 )
 
 type ErrorResponse struct {
@@ -104,9 +106,10 @@ func txnAddHandler(w http.ResponseWriter, r *http.Request, node *Node) {
 
 func statusHandler(w http.ResponseWriter, r *http.Request, node *Node) {
 	res := StatusRes{
-		Hash:       node.state.LatestBlockHash(),
-		Height:     node.state.LatestBlock().Header.Height,
-		KnownPeers: node.knownPeers,
+		Hash:        node.state.LatestBlockHash(),
+		Height:      node.state.LatestBlock().Header.Height,
+		KnownPeers:  node.knownPeers,
+		PendingTxns: node.getPendingTxnsAsArray(),
 	}
 	writeRes(w, res)
 }
@@ -145,4 +148,33 @@ func syncHandler(w http.ResponseWriter, r *http.Request, node *Node) {
 		return
 	}
 	writeRes(w, SyncRes{Blocks: blocks})
+}
+
+func getBlockByHashOrHeight(w http.ResponseWriter, r *http.Request, node *Node) {
+	errorRequiredParams := errors.New("height or hash parameter is required")
+
+	params := strings.Split(r.URL.Path, "/")[1:]
+	if len(params) < 2 {
+		writeErrorRes(w, errorRequiredParams)
+	}
+
+	part := strings.TrimSpace(params[1])
+	if len(part) == 0 {
+		writeErrorRes(w, errorRequiredParams)
+		return
+	}
+
+	hash := ""
+	height, err := strconv.ParseUint(part, 10, 64)
+	if err != nil {
+		hash = part
+	}
+
+	block, err := database.GetBlockByHashOrHeight(node.state, height, hash, node.dataDir)
+	if err != nil {
+		writeErrorRes(w, errorRequiredParams)
+		return
+	}
+
+	writeRes(w, block)
 }

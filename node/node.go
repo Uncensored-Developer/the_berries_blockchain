@@ -139,6 +139,10 @@ func (n *Node) Run(ctx context.Context) error {
 		syncHandler(w, req, n)
 	})
 
+	handler.HandleFunc("/block/", func(w http.ResponseWriter, req *http.Request) {
+		getBlockByHashOrHeight(w, req, n)
+	})
+
 	server := &http.Server{Addr: fmt.Sprintf(":%d", n.info.Port), Handler: handler}
 
 	go func() {

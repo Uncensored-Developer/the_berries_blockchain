@@ -50,7 +50,6 @@ func (s *State) GetNextAccountNonce(account common.Address) uint {
 }
 
 func (s *State) IsForkOIP1() bool {
-	log.Printf("GASS: %d, %d", s.NextBlockHeight(), s.forkOIP1)
 	return s.NextBlockHeight() >= s.forkOIP1
 }
 
@@ -91,7 +90,7 @@ func NewStateFromDisk(dataDir string) (*State, error) {
 	}
 
 	filePos := int64(0)
-	//loop over each of the txn line in the txn.db file
+	//loop over each of the txn line in the blocks.db file
 	for scanner.Scan() {
 		if err := scanner.Err(); err != nil {
 			return nil, err
