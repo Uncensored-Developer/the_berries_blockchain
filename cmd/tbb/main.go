@@ -18,7 +18,7 @@ const flagBootstrapPort = "bootstrap_port"
 func main() {
 	tbbCmd := &cobra.Command{
 		Use:   "tbb",
-		Short: "The Berries Blockchain CLI",
+		Short: "The One Piece Berries Blockchain CLI",
 		Run: func(cmd *cobra.Command, args []string) {
 
 		},

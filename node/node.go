@@ -139,7 +139,7 @@ func (n *Node) Run(ctx context.Context) error {
 		syncHandler(w, req, n)
 	})
 
-	handler.HandleFunc("/block/", func(w http.ResponseWriter, req *http.Request) {
+	handler.HandleFunc("/blocks/", func(w http.ResponseWriter, req *http.Request) {
 		getBlockByHashOrHeightHandler(w, req, n)
 	})
 
