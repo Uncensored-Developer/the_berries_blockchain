@@ -92,4 +92,4 @@ go test -v -p=1 -timeout=0 ./...
 ```
 
 # TODO:
-- Switch node communication from HTTP to gRPC
+- Migrate node communication from HTTP API to gRPC
